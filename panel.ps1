@@ -142,6 +142,7 @@ function Get-StateStyle($state, $live) {
     switch ($state) {
         'running'    { return @{ color = [System.Drawing.Color]::FromArgb(59,130,246);  label = 'Running' } }       # blue
         'permission' { return @{ color = [System.Drawing.Color]::FromArgb(239,68,68);   label = 'Needs permission' } } # red
+        'ask'        { return @{ color = [System.Drawing.Color]::FromArgb(168,85,247);  label = 'Needs answer' } }   # purple
         'done'       { return @{ color = [System.Drawing.Color]::FromArgb(34,197,94);   label = 'Done' } }          # green
         'idle'       { return @{ color = [System.Drawing.Color]::FromArgb(245,158,11);  label = 'Idle' } }          # amber
         default      { return @{ color = [System.Drawing.Color]::FromArgb(148,163,184); label = 'Live' } }          # slate

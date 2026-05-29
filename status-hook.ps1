@@ -66,13 +66,14 @@ try {
         $title = $label
     }
 
-    $state = $Event          # running | done | idle  (passed verbatim)
+    $state = $Event          # running | done | idle | ask  (passed verbatim)
     $message = ''
     if ($Event -eq 'notify') {
-        switch ($j.notification_type) {
-            'permission_prompt' { $state = 'permission' }
-            'idle_prompt'       { $state = 'idle' }
-            default             { $state = 'idle' }
+        switch -Wildcard ([string]$j.notification_type) {
+            'permission*'        { $state = 'permission' }   # needs your approval
+            'elicitation_dialog' { $state = 'ask' }          # MCP form: needs your answer
+            'idle*'              { $state = 'idle' }          # idle, waiting for input
+            default              { $state = if ($prevState) { $prevState } else { 'idle' } }
         }
         if ($j.message) { $message = [string]$j.message }
     }

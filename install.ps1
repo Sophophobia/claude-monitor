@@ -54,18 +54,22 @@ if (-not ($root -is [System.Collections.IDictionary])) { $root = [ordered]@{} }
 if (-not $root.Contains('hooks')) { $root['hooks'] = [ordered]@{} }
 $hooks = $root['hooks']
 
-# event -> -Event argument
-$events = [ordered]@{
-    SessionStart     = 'idle'
-    UserPromptSubmit = 'running'
-    Stop             = 'done'
-    Notification     = 'notify'
-    SessionEnd       = 'end'
-}
+# event, -Event argument, and optional tool matcher.
+# AskUserQuestion does not fire Notification, so we catch "needs your answer"
+# via PreToolUse (set 'ask') and clear it via PostToolUse (back to 'running').
+$events = @(
+    @{ evt = 'SessionStart';     arg = 'idle';    matcher = $null }
+    @{ evt = 'UserPromptSubmit'; arg = 'running'; matcher = $null }
+    @{ evt = 'Stop';             arg = 'done';    matcher = $null }
+    @{ evt = 'Notification';     arg = 'notify';  matcher = $null }
+    @{ evt = 'SessionEnd';       arg = 'end';     matcher = $null }
+    @{ evt = 'PreToolUse';       arg = 'ask';     matcher = 'AskUserQuestion' }
+    @{ evt = 'PostToolUse';      arg = 'running'; matcher = 'AskUserQuestion' }
+)
 
-foreach ($evt in $events.Keys) {
-    $arg = $events[$evt]
-    $cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File "{0}" -Event {1}' -f $hookPath, $arg
+foreach ($e in $events) {
+    $evt = $e.evt
+    $cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -File "{0}" -Event {1}' -f $hookPath, $e.arg
 
     $existing = @()
     if ($hooks.Contains($evt) -and $hooks[$evt]) { $existing = @($hooks[$evt]) }
@@ -82,7 +86,9 @@ foreach ($evt in $events.Keys) {
         if (-not $isOurs) { $kept += , $group }
     }
 
-    $beaconGroup = [ordered]@{ hooks = @( [ordered]@{ type = 'command'; command = $cmd } ) }
+    $beaconGroup = [ordered]@{}
+    if ($e.matcher) { $beaconGroup['matcher'] = $e.matcher }
+    $beaconGroup['hooks'] = @( [ordered]@{ type = 'command'; command = $cmd } )
     $kept += , $beaconGroup
     $hooks[$evt] = $kept
 }

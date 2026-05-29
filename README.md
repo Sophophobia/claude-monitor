@@ -19,6 +19,7 @@ Each pinned session is one row: a colored dot + a label + its current state.
 |---|---|---|---|
 | 🔵 | `Running` | Claude is working | `UserPromptSubmit` |
 | 🔴 | `Needs permission` | Waiting for you to approve a tool | `Notification` (permission) |
+| 🟣 | `Needs answer` | Claude asked you a question | `PreToolUse` (AskUserQuestion) |
 | 🟢 | `Done` | Finished its turn | `Stop` |
 | 🟠 | `Idle` | Idle, waiting for input | `Notification` (idle) / `SessionStart` |
 | ⚪ | `Ended` | Session closed / process gone | `SessionEnd` or pid no longer alive |
@@ -129,6 +130,7 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
 |---|---|---|---|
 | 🔵 | `Running` | Claude 正在工作 | `UserPromptSubmit` |
 | 🔴 | `Needs permission` | 等你批准某个工具 | `Notification`（权限） |
+| 🟣 | `Needs answer` | Claude 问了你一个问题 | `PreToolUse`（AskUserQuestion） |
 | 🟢 | `Done` | 它这一轮结束了，轮到你 | `Stop` |
 | 🟠 | `Idle` | 闲置，等待输入 | `Notification`（idle）/ `SessionStart` |
 | ⚪ | `Ended` | 会话关闭 / 进程没了 | `SessionEnd` 或 pid 已退出 |
