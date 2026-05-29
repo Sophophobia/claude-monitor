@@ -1,4 +1,4 @@
-# Beacon
+# Claude Monitor
 
 > A status light for your Claude Code sessions.
 
@@ -29,7 +29,7 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
 | `status-hook.ps1` | Invoked by hooks. Writes `~/.claude/session-status/<session_id>.json`. Never blocks Claude (always exits 0). |
 | `panel.ps1` | The floating WinForms panel. |
 | `start-panel.vbs` | Launches the panel with no console window. |
-| `config.json` | Auto-created. Stores pinned session ids + window position. |
+| `config.json` | Auto-created. Stores pinned session ids, window position, and custom names. |
 
 ## States
 
@@ -45,13 +45,16 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
 
 Each row is labelled with an **auto-title** taken from the session's first
 prompt (the same idea as the desktop app's auto-generated titles). The folder
-name is the fallback when no title is known, and it is always shown in the
-row's tooltip along with the short session id.
+name is the fallback when no title is known.
+
+To set your own label, **right-click a row -> Rename**. The custom name is saved
+in `config.json` (keyed by session id) and overrides the auto-title. Right-click
+-> "Use auto title" clears it. Label priority: custom name > auto-title > folder.
 
 > The desktop app's own sidebar titles live in the app's IndexedDB keyed by an
 > internal `local_<uuid>` id, which is a different id space from the CLI
 > `session_id` these hooks see, and the app does not expose the mapping. So
-> Beacon generates its own label rather than reading the app's.
+> Claude Monitor generates its own label rather than reading the app's.
 
 ## Usage
 
@@ -59,8 +62,9 @@ row's tooltip along with the short session id.
    (or `powershell -NoProfile -ExecutionPolicy Bypass -Sta -File panel.ps1`).
 2. **Pick sessions** - click the menu button, tick the sessions you want to watch.
    Pins persist across restarts.
-3. **Move it** - drag the title bar anywhere. Position is remembered.
-4. **Close** - click the X (panel only; hooks keep running and cost ~nothing).
+3. **Rename a session** - right-click its row -> Rename.
+4. **Move it** - drag the title bar anywhere. Position is remembered.
+5. **Close** - click the X (panel only; hooks keep running and cost ~nothing).
 
 ## Install / set up on another machine
 

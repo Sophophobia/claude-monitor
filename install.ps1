@@ -1,9 +1,9 @@
 <#
-  install.ps1  --  set up Beacon on this machine.
+  install.ps1  --  set up Claude Monitor on this machine.
 
   What it does (idempotent, non-destructive):
     1. Makes sure ~/.claude/session-status exists.
-    2. Merges Beacon's 5 hooks into ~/.claude/settings.json, using THIS
+    2. Merges Claude Monitor's 5 hooks into ~/.claude/settings.json, using THIS
        machine's path to status-hook.ps1 (so it is portable across machines /
        usernames). Existing settings and other hooks are preserved; a backup is
        written to settings.json.bak first.
@@ -70,16 +70,16 @@ foreach ($evt in $events.Keys) {
     $existing = @()
     if ($hooks.Contains($evt) -and $hooks[$evt]) { $existing = @($hooks[$evt]) }
 
-    # Remove any prior Beacon entries (so re-running fixes a stale path), keep others.
+    # Remove any prior Claude Monitor entries (so re-running fixes a stale path), keep others.
     $kept = @()
     foreach ($group in $existing) {
-        $isBeacon = $false
+        $isOurs = $false
         if ($group -and $group.Contains('hooks')) {
             foreach ($h in @($group['hooks'])) {
-                if ($h.Contains('command') -and ([string]$h['command']) -match 'status-hook\.ps1') { $isBeacon = $true }
+                if ($h.Contains('command') -and ([string]$h['command']) -match 'status-hook\.ps1') { $isOurs = $true }
             }
         }
-        if (-not $isBeacon) { $kept += , $group }
+        if (-not $isOurs) { $kept += , $group }
     }
 
     $beaconGroup = [ordered]@{ hooks = @( [ordered]@{ type = 'command'; command = $cmd } ) }
@@ -95,13 +95,13 @@ Write-Host "     hook script     : $hookPath"
 # 3) optional startup shortcut
 if ($Startup) {
     $startupDir = [System.Environment]::GetFolderPath('Startup')
-    $lnk = Join-Path $startupDir 'Beacon.lnk'
+    $lnk = Join-Path $startupDir 'Claude Monitor.lnk'
     $ws = New-Object -ComObject WScript.Shell
     $sc = $ws.CreateShortcut($lnk)
     $sc.TargetPath = (Join-Path $env:WINDIR 'System32\wscript.exe')
     $sc.Arguments  = '"' + $vbsPath + '"'
     $sc.WorkingDirectory = $here
-    $sc.Description = 'Beacon - Claude Code session monitor'
+    $sc.Description = 'Claude Monitor - Claude Code session monitor'
     $sc.Save()
     Write-Host "[ok] startup shortcut: $lnk"
 }

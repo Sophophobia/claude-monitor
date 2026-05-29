@@ -14,6 +14,7 @@
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName Microsoft.VisualBasic   # InputBox for the Rename dialog
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 # ---------------------------------------------------------------- paths -----
@@ -24,9 +25,10 @@ $SessionDir = Join-Path $Home_ '.claude\sessions'
 $ConfigPath = Join-Path $PSScriptRoot 'config.json'
 
 # --------------------------------------------------------------- config -----
-$script:Pins = @()
-$script:PosX = $null
-$script:PosY = $null
+$script:Pins  = @()
+$script:PosX  = $null
+$script:PosY  = $null
+$script:Names = @{}   # sessionId -> custom display name (overrides the auto-title)
 
 function Load-Config {
     try {
@@ -35,6 +37,11 @@ function Load-Config {
             if ($c.pins) { $script:Pins = @($c.pins) }
             if ($null -ne $c.x) { $script:PosX = [int]$c.x }
             if ($null -ne $c.y) { $script:PosY = [int]$c.y }
+            if ($c.names) {
+                $h = @{}
+                foreach ($p in $c.names.PSObject.Properties) { $h[$p.Name] = [string]$p.Value }
+                $script:Names = $h
+            }
         }
     } catch { }
 }
@@ -42,12 +49,20 @@ function Load-Config {
 function Save-Config {
     try {
         $obj = [ordered]@{
-            pins = @($script:Pins)
-            x    = $script:PosX
-            y    = $script:PosY
+            pins  = @($script:Pins)
+            x     = $script:PosX
+            y     = $script:PosY
+            names = $script:Names
         }
         ($obj | ConvertTo-Json -Compress) | Set-Content -Path $ConfigPath -Encoding UTF8
     } catch { }
+}
+
+# Display label priority: custom name > auto-title (first prompt) > project folder.
+function Get-Display($sid, $s) {
+    if ($script:Names.ContainsKey($sid) -and $script:Names[$sid]) { return $script:Names[$sid] }
+    if ($s.title) { return $s.title }
+    return $s.project
 }
 
 # ----------------------------------------------------- data acquisition -----
@@ -181,7 +196,7 @@ $bar.BackColor = $cBar
 $form.Controls.Add($bar)
 
 $title = New-Object System.Windows.Forms.Label
-$title.Text      = [char]0x25C9 + ' Beacon'
+$title.Text      = [char]0x25C9 + ' Claude Monitor'
 $title.ForeColor = $cText
 $title.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
 $title.AutoSize  = $false
@@ -263,6 +278,27 @@ function Toggle-Pin($sid) {
     Refresh-Rows -force
 }
 
+# ------------------------------------------------------------- renaming -----
+function Set-Name($sid, $current) {
+    $new = [Microsoft.VisualBasic.Interaction]::InputBox(
+        "Custom name for this session (clear and OK, or Cancel, to keep the auto title):",
+        "Rename session", $current)
+    # InputBox returns '' on Cancel and on an emptied box. Treat empty as "use auto title".
+    if ([string]::IsNullOrWhiteSpace($new)) {
+        if ($script:Names.ContainsKey($sid)) { $script:Names.Remove($sid) }
+    } else {
+        $script:Names[$sid] = $new.Trim()
+    }
+    Save-Config
+    Refresh-Rows -force
+}
+
+function Clear-Name($sid) {
+    if ($script:Names.ContainsKey($sid)) { $script:Names.Remove($sid) }
+    Save-Config
+    Refresh-Rows -force
+}
+
 # ------------------------------------------------------------ menu (≡) ------
 $btnMenu.Add_Click({
     $menu = New-Object System.Windows.Forms.ContextMenuStrip
@@ -284,7 +320,8 @@ $btnMenu.Add_Click({
         $s = $all[$sid]
         $st = Get-StateStyle $s.state $s.live
         $tag = if ($s.live) { $st.label } else { 'ended' }
-        $disp = if ($s.title) { '{0}: {1}' -f $s.project, $s.title } else { $s.project }
+        $lbl2 = Get-Display $sid $s
+        $disp = if ($lbl2 -ne $s.project) { '{0}: {1}' -f $s.project, $lbl2 } else { $s.project }
         $label = ('{0}  ({1})  [{2}]' -f $disp, $sid.Substring(0, [Math]::Min(8,$sid.Length)), $tag)
         $item = New-Object System.Windows.Forms.ToolStripMenuItem($label)
         $item.Checked = ($script:Pins -contains $sid)
@@ -327,7 +364,10 @@ function Refresh-Rows {
     # Signature to avoid needless rebuilds (no flicker when nothing changed).
     $sig = ($script:Pins | ForEach-Object {
         $s = $all[$_]
-        if ($s) { '{0}:{1}:{2}:{3}' -f $_, $s.state, $s.live, $s.title } else { "$_:gone" }
+        if ($s) {
+            $nm = if ($script:Names.ContainsKey($_)) { $script:Names[$_] } else { '' }
+            '{0}:{1}:{2}:{3}:{4}' -f $_, $s.state, $s.live, $s.title, $nm
+        } else { "$_:gone" }
     }) -join '|'
     if (-not $force -and $sig -eq $script:lastSig) { return }
     $script:lastSig = $sig
@@ -367,7 +407,7 @@ function Refresh-Rows {
             $dot.TextAlign = 'MiddleCenter'
             $row.Controls.Add($dot)
 
-            $display = if ($s.title) { $s.title } else { $s.project }
+            $display = Get-Display $sid $s
             $name = New-Object System.Windows.Forms.Label
             $name.Text         = $display
             $name.ForeColor    = $cText
@@ -379,7 +419,8 @@ function Refresh-Rows {
             $name.TextAlign    = 'MiddleLeft'
             $row.Controls.Add($name)
             $shortId = $sid.Substring(0, [Math]::Min(8, $sid.Length))
-            $tipText = "{0}`r`n{1}`r`n{2}" -f $s.project, $s.title, ("id " + $shortId)
+            $auto = if ($s.title) { $s.title } else { $s.project }
+            $tipText = "{0}`r`n{1}`r`n{2}" -f $s.project, $auto, ("id " + $shortId + "   (right-click to rename)")
             $script:tip.SetToolTip($name, $tipText.Trim())
             $script:tip.SetToolTip($dot, $tipText.Trim())
 
@@ -392,6 +433,27 @@ function Refresh-Rows {
             $stt.Size      = New-Object System.Drawing.Size(($W - 188), $RowH)
             $stt.TextAlign = 'MiddleRight'
             $row.Controls.Add($stt)
+
+            # Right-click menu for this row: rename / reset / unpin.
+            $rowMenu = New-Object System.Windows.Forms.ContextMenuStrip
+            $rowMenu.BackColor = $cBar
+            $rowMenu.ForeColor = $cText
+            $miRename = New-Object System.Windows.Forms.ToolStripMenuItem('Rename...')
+            $miRename.Add_Click({ Set-Name $sid $display }.GetNewClosure())
+            [void]$rowMenu.Items.Add($miRename)
+            if ($script:Names.ContainsKey($sid)) {
+                $miReset = New-Object System.Windows.Forms.ToolStripMenuItem('Use auto title')
+                $miReset.Add_Click({ Clear-Name $sid }.GetNewClosure())
+                [void]$rowMenu.Items.Add($miReset)
+            }
+            [void]$rowMenu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+            $miUnpin = New-Object System.Windows.Forms.ToolStripMenuItem('Unpin')
+            $miUnpin.Add_Click({ Toggle-Pin $sid }.GetNewClosure())
+            [void]$rowMenu.Items.Add($miUnpin)
+            $row.ContextMenuStrip  = $rowMenu
+            $name.ContextMenuStrip = $rowMenu
+            $dot.ContextMenuStrip  = $rowMenu
+            $stt.ContextMenuStrip  = $rowMenu
 
             $content.Controls.Add($row)
             $y += $RowH
