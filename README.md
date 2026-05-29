@@ -19,7 +19,7 @@ Each pinned session is one row: a colored dot + a label + its current state.
 |---|---|---|---|
 | 🔵 | `Running` | Claude is working | `UserPromptSubmit` |
 | 🔴 | `Needs permission` | Waiting for you to approve a tool | `Notification` (permission) |
-| 🟢 | `Your turn` | Finished its turn | `Stop` |
+| 🟢 | `Done` | Finished its turn | `Stop` |
 | 🟠 | `Idle` | Idle, waiting for input | `Notification` (idle) / `SessionStart` |
 | ⚪ | `Ended` | Session closed / process gone | `SessionEnd` or pid no longer alive |
 
@@ -72,6 +72,7 @@ existing `settings.json` to `settings.json.bak` and preserves other hooks.
 - **Launch:** double-click `start-panel.vbs` (or run `panel.ps1`).
 - **Pick sessions:** click the menu button (≡), tick the sessions to watch. Pins persist.
 - **Rename:** `#name <label>` in the session, or right-click a row → Rename.
+- **Reorder:** right-click a row → Move up / Move down to change the order.
 - **Move:** drag the title bar. Position is remembered.
 - **Close:** click ✕ (the panel only; hooks keep running and cost ~nothing).
 - **Autostart:** `install.ps1 -Startup`, or drop a shortcut to `start-panel.vbs`
@@ -105,7 +106,7 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
 
 - State only updates for sessions started **after** the hooks were installed.
 - After you approve a permission prompt, the row stays `Needs permission` until
-  the turn finishes (`Stop` → `Your turn`); no per-tool event is wired up, to keep
+  the turn finishes (`Stop` → `Done`); no per-tool event is wired up, to keep
   hook latency near zero.
 - A pinned session that ends shows `Ended`; menu → "Unpin ended sessions" clears them.
 - Windows only (PowerShell + WinForms).
@@ -128,7 +129,7 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
 |---|---|---|---|
 | 🔵 | `Running` | Claude 正在工作 | `UserPromptSubmit` |
 | 🔴 | `Needs permission` | 等你批准某个工具 | `Notification`（权限） |
-| 🟢 | `Your turn` | 它这一轮结束了，轮到你 | `Stop` |
+| 🟢 | `Done` | 它这一轮结束了，轮到你 | `Stop` |
 | 🟠 | `Idle` | 闲置，等待输入 | `Notification`（idle）/ `SessionStart` |
 | ⚪ | `Ended` | 会话关闭 / 进程没了 | `SessionEnd` 或 pid 已退出 |
 
@@ -170,6 +171,7 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
 - **启动：** 双击 `start-panel.vbs`（或直接跑 `panel.ps1`）。
 - **选会话：** 点 ≡ 菜单，勾选要盯的会话。pin 会被记住。
 - **改名：** 会话里打 `#name <名字>`，或面板右键某行 → Rename。
+- **调整顺序：** 右键某行 → Move up / Move down 上移或下移。
 - **移动：** 拖标题栏，位置会被记住。
 - **关闭：** 点 ✕（只关面板；hooks 继续跑，几乎不耗资源）。
 - **开机自启：** `install.ps1 -Startup`，或把 `start-panel.vbs` 的快捷方式放进 `shell:startup` 文件夹。删掉那个快捷方式即可取消。
@@ -198,6 +200,6 @@ Claude Code 会话 --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<id
 ## 说明 / 局限
 
 - 状态只对「安装 hooks 之后新开的会话」更新。
-- 批准权限后，那一行会一直停在 `Needs permission`，直到该轮结束（`Stop` → `Your turn`）；为把 hook 延迟降到最低，没有挂逐个工具的事件。
+- 批准权限后，那一行会一直停在 `Needs permission`，直到该轮结束（`Stop` → `Done`）；为把 hook 延迟降到最低，没有挂逐个工具的事件。
 - pin 的会话结束后显示 `Ended`；菜单 → “Unpin ended sessions” 可清理。
 - 仅支持 Windows（PowerShell + WinForms）。

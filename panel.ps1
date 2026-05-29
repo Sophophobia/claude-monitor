@@ -142,7 +142,7 @@ function Get-StateStyle($state, $live) {
     switch ($state) {
         'running'    { return @{ color = [System.Drawing.Color]::FromArgb(59,130,246);  label = 'Running' } }       # blue
         'permission' { return @{ color = [System.Drawing.Color]::FromArgb(239,68,68);   label = 'Needs permission' } } # red
-        'done'       { return @{ color = [System.Drawing.Color]::FromArgb(34,197,94);   label = 'Your turn' } }     # green
+        'done'       { return @{ color = [System.Drawing.Color]::FromArgb(34,197,94);   label = 'Done' } }          # green
         'idle'       { return @{ color = [System.Drawing.Color]::FromArgb(245,158,11);  label = 'Idle' } }          # amber
         default      { return @{ color = [System.Drawing.Color]::FromArgb(148,163,184); label = 'Live' } }          # slate
     }
@@ -301,6 +301,20 @@ function Clear-Name($sid) {
     Refresh-Rows -force
 }
 
+# ---------------------------------------------------------- reordering ------
+# Move a pinned session up (-1) or down (+1) in the panel order.
+function Move-Pin($sid, $delta) {
+    $list = @($script:Pins)
+    $i = [array]::IndexOf($list, [string]$sid)
+    if ($i -lt 0) { return }
+    $j = $i + $delta
+    if ($j -lt 0 -or $j -ge $list.Count) { return }
+    $tmp = $list[$i]; $list[$i] = $list[$j]; $list[$j] = $tmp
+    $script:Pins = @($list)
+    Save-Config
+    Refresh-Rows -force
+}
+
 # ------------------------------------------------------------ menu (≡) ------
 $btnMenu.Add_Click({
     $menu = New-Object System.Windows.Forms.ContextMenuStrip
@@ -388,6 +402,7 @@ function Refresh-Rows {
         $form.Height = $TitleH + $RowH + 8
     } else {
         $y = 4
+        $rowIdx = 0
         foreach ($sid in $rows) {
             $s = $all[$sid]
             $st = Get-StateStyle $s.state $s.live
@@ -446,6 +461,15 @@ function Refresh-Rows {
                 [void]$rowMenu.Items.Add($miReset)
             }
             [void]$rowMenu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+            $miUp = New-Object System.Windows.Forms.ToolStripMenuItem('Move up')
+            $miUp.Enabled = ($rowIdx -gt 0)
+            $miUp.Add_Click({ Move-Pin $sid -1 }.GetNewClosure())
+            [void]$rowMenu.Items.Add($miUp)
+            $miDown = New-Object System.Windows.Forms.ToolStripMenuItem('Move down')
+            $miDown.Enabled = ($rowIdx -lt ($rows.Count - 1))
+            $miDown.Add_Click({ Move-Pin $sid 1 }.GetNewClosure())
+            [void]$rowMenu.Items.Add($miDown)
+            [void]$rowMenu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
             $miUnpin = New-Object System.Windows.Forms.ToolStripMenuItem('Unpin')
             $miUnpin.Add_Click({ Toggle-Pin $sid }.GetNewClosure())
             [void]$rowMenu.Items.Add($miUnpin)
@@ -456,6 +480,7 @@ function Refresh-Rows {
 
             $content.Controls.Add($row)
             $y += $RowH
+            $rowIdx++
         }
         $form.Height = $TitleH + $y + 6
     }
