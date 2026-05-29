@@ -43,13 +43,18 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
 
 ## Session labels
 
-Each row is labelled with an **auto-title** taken from the session's first
-prompt (the same idea as the desktop app's auto-generated titles). The folder
-name is the fallback when no title is known.
+By default a row shows `project-folder (shortid)`, e.g. `MividaDemo (cce08d93)`.
+To give a session a meaningful name, use either:
 
-To set your own label, **right-click a row -> Rename**. The custom name is saved
-in `config.json` (keyed by session id) and overrides the auto-title. Right-click
--> "Use auto title" clears it. Label priority: custom name > auto-title > folder.
+- **From inside the session:** type `#name <label>` (e.g. `#name Frontend refactor`).
+  The `UserPromptSubmit` hook captures it, labels that exact session, and blocks
+  the prompt so Claude never processes it (you see a small "session labelled"
+  confirmation). Re-run any time to change it. This binds to the correct
+  `session_id` automatically, so you never have to look up an id.
+- **From the panel:** right-click a row -> Rename (saved in `config.json`).
+  Right-click -> "Use auto title" clears it.
+
+Label priority: panel custom name > `#name` label > `project (shortid)`.
 
 > The desktop app's own sidebar titles live in the app's IndexedDB keyed by an
 > internal `local_<uuid>` id, which is a different id space from the CLI

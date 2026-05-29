@@ -40,9 +40,34 @@ try {
         exit 0
     }
 
+    # Preserve an existing custom label (set via "#name") and prior state.
+    $title = ''
+    $prevState = ''
+    if (Test-Path $file) {
+        try {
+            $prev = Get-Content $file -Raw -ErrorAction Stop | ConvertFrom-Json
+            if ($prev.title) { $title = [string]$prev.title }
+            if ($prev.state) { $prevState = [string]$prev.state }
+        } catch { }
+    }
+
+    $cwd = [string]$j.cwd
+    $proj = ''
+    if ($cwd) { $proj = Split-Path $cwd -Leaf }
+
+    # In-session label command: a prompt like "#name Frontend refactor" on
+    # UserPromptSubmit sets the panel label for THIS session and blocks the
+    # prompt (below) so Claude never processes it.
+    $isMarker = $false
+    if ($Event -eq 'running' -and $j.prompt -and ([string]$j.prompt) -match '^\s*#name\s+(.+?)\s*$') {
+        $isMarker = $true
+        $label = (($matches[1]) -replace '\s+', ' ').Trim()
+        if ($label.Length -gt 60) { $label = $label.Substring(0, 60) }
+        $title = $label
+    }
+
     $state = $Event          # running | done | idle  (passed verbatim)
     $message = ''
-
     if ($Event -eq 'notify') {
         switch ($j.notification_type) {
             'permission_prompt' { $state = 'permission' }
@@ -51,26 +76,8 @@ try {
         }
         if ($j.message) { $message = [string]$j.message }
     }
-
-    $cwd = [string]$j.cwd
-    $proj = ''
-    if ($cwd) { $proj = Split-Path $cwd -Leaf }
-
-    # Preserve an existing auto-title across subsequent events.
-    $title = ''
-    if (Test-Path $file) {
-        try {
-            $prev = Get-Content $file -Raw -ErrorAction Stop | ConvertFrom-Json
-            if ($prev.title) { $title = [string]$prev.title }
-        } catch { }
-    }
-    # On the first user prompt, derive a title from it (same idea as the app's
-    # auto-generated title). Only set it once; later prompts don't overwrite.
-    if ([string]::IsNullOrWhiteSpace($title) -and $j.prompt) {
-        $p = (([string]$j.prompt) -replace '\s+', ' ').Trim()
-        if ($p.Length -gt 48) { $p = $p.Substring(0, 48) + [char]0x2026 }
-        $title = $p
-    }
+    # A label command is not real work, so keep whatever state we were in.
+    if ($isMarker -and $prevState) { $state = $prevState }
 
     $obj = [ordered]@{
         sessionId = $sid
@@ -87,6 +94,17 @@ try {
     $tmp = $file + '.tmp'
     ($obj | ConvertTo-Json -Compress) | Set-Content -Path $tmp -Encoding UTF8
     Move-Item -Force -Path $tmp -Destination $file
+
+    # If this was a "#name" label command, block the prompt with clean feedback
+    # (JSON decision=block, exit 0) so it never reaches Claude. UTF-8 stdout for
+    # non-ASCII labels.
+    if ($isMarker) {
+        $resp  = @{ decision = 'block'; reason = ('Claude Monitor: session labelled "{0}"' -f $title) } | ConvertTo-Json -Compress
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($resp)
+        $out   = [System.Console]::OpenStandardOutput()
+        $out.Write($bytes, 0, $bytes.Length)
+        $out.Flush()
+    }
 }
 catch { }
 

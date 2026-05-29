@@ -58,11 +58,13 @@ function Save-Config {
     } catch { }
 }
 
-# Display label priority: custom name > auto-title (first prompt) > project folder.
+# Display label priority: custom name (panel rename) > "#name" label > "project (shortid)".
 function Get-Display($sid, $s) {
     if ($script:Names.ContainsKey($sid) -and $script:Names[$sid]) { return $script:Names[$sid] }
     if ($s.title) { return $s.title }
-    return $s.project
+    $short = $sid.Substring(0, [Math]::Min(8, $sid.Length))
+    if ($s.project) { return ('{0} ({1})' -f $s.project, $short) }
+    return $short
 }
 
 # ----------------------------------------------------- data acquisition -----
@@ -320,9 +322,7 @@ $btnMenu.Add_Click({
         $s = $all[$sid]
         $st = Get-StateStyle $s.state $s.live
         $tag = if ($s.live) { $st.label } else { 'ended' }
-        $lbl2 = Get-Display $sid $s
-        $disp = if ($lbl2 -ne $s.project) { '{0}: {1}' -f $s.project, $lbl2 } else { $s.project }
-        $label = ('{0}  ({1})  [{2}]' -f $disp, $sid.Substring(0, [Math]::Min(8,$sid.Length)), $tag)
+        $label = ('{0}  [{1}]' -f (Get-Display $sid $s), $tag)
         $item = New-Object System.Windows.Forms.ToolStripMenuItem($label)
         $item.Checked = ($script:Pins -contains $sid)
         $item.Tag = $sid
@@ -419,10 +419,9 @@ function Refresh-Rows {
             $name.TextAlign    = 'MiddleLeft'
             $row.Controls.Add($name)
             $shortId = $sid.Substring(0, [Math]::Min(8, $sid.Length))
-            $auto = if ($s.title) { $s.title } else { $s.project }
-            $tipText = "{0}`r`n{1}`r`n{2}" -f $s.project, $auto, ("id " + $shortId + "   (right-click to rename)")
-            $script:tip.SetToolTip($name, $tipText.Trim())
-            $script:tip.SetToolTip($dot, $tipText.Trim())
+            $tipText = "{0}`r`nid {1}`r`nRename: right-click, or type  #name <label>  in the session" -f $s.project, $shortId
+            $script:tip.SetToolTip($name, $tipText)
+            $script:tip.SetToolTip($dot, $tipText)
 
             $stt = New-Object System.Windows.Forms.Label
             $stt.Text      = $st.label
