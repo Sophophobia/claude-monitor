@@ -1,0 +1,5 @@
+# Machine-local panel state (pinned session ids + window position)
+config.json
+
+# Backups created by install.ps1
+*.bak
