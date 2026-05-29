@@ -18,10 +18,10 @@ Each pinned session is one row: a colored dot + a label + its current state.
 | Dot | State | Meaning | Fired by hook |
 |---|---|---|---|
 | 🔵 | `Running` | Claude is working | `UserPromptSubmit` |
-| 🔴 | `Needs permission` | Waiting for you to approve a tool | `Notification` (permission) |
+| 🟠 | `Needs permission` | Waiting for you to approve a tool | `Notification` (permission) |
 | 🟣 | `Needs answer` | Claude asked you a question | `PreToolUse` (AskUserQuestion) |
 | 🟢 | `Done` | Finished its turn | `Stop` |
-| 🟠 | `Idle` | Idle, waiting for input | `Notification` (idle) / `SessionStart` |
+| 🟡 | `Idle` | Idle, waiting for input | `Notification` (idle) / `SessionStart` |
 | ⚪ | `Ended` | Session closed / process gone | `SessionEnd` or pid no longer alive |
 
 ## Naming sessions
@@ -73,7 +73,7 @@ existing `settings.json` to `settings.json.bak` and preserves other hooks.
 - **Launch:** double-click `start-panel.vbs` (or run `panel.ps1`).
 - **Pick sessions:** click the menu button (≡), tick the sessions to watch. Pins persist.
 - **Rename:** `#name <label>` in the session, or right-click a row → Rename.
-- **Reorder:** right-click a row → Move up / Move down to change the order.
+- **Reorder:** drag a row up or down (or right-click → Move up / Move down).
 - **Move:** drag the title bar. Position is remembered.
 - **Close:** click ✕ (the panel only; hooks keep running and cost ~nothing).
 - **Autostart:** `install.ps1 -Startup`, or drop a shortcut to `start-panel.vbs`
@@ -129,10 +129,10 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
 | 圆点 | 状态 | 含义 | 触发的 hook |
 |---|---|---|---|
 | 🔵 | `Running` | Claude 正在工作 | `UserPromptSubmit` |
-| 🔴 | `Needs permission` | 等你批准某个工具 | `Notification`（权限） |
+| 🟠 | `Needs permission` | 等你批准某个工具 | `Notification`（权限） |
 | 🟣 | `Needs answer` | Claude 问了你一个问题 | `PreToolUse`（AskUserQuestion） |
 | 🟢 | `Done` | 它这一轮结束了，轮到你 | `Stop` |
-| 🟠 | `Idle` | 闲置，等待输入 | `Notification`（idle）/ `SessionStart` |
+| 🟡 | `Idle` | 闲置，等待输入 | `Notification`（idle）/ `SessionStart` |
 | ⚪ | `Ended` | 会话关闭 / 进程没了 | `SessionEnd` 或 pid 已退出 |
 
 ## 给会话命名
@@ -173,7 +173,7 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
 - **启动：** 双击 `start-panel.vbs`（或直接跑 `panel.ps1`）。
 - **选会话：** 点 ≡ 菜单，勾选要盯的会话。pin 会被记住。
 - **改名：** 会话里打 `#name <名字>`，或面板右键某行 → Rename。
-- **调整顺序：** 右键某行 → Move up / Move down 上移或下移。
+- **调整顺序：** 直接拖动某一行上下移动（或右键 → Move up / Move down）。
 - **移动：** 拖标题栏，位置会被记住。
 - **关闭：** 点 ✕（只关面板；hooks 继续跑，几乎不耗资源）。
 - **开机自启：** `install.ps1 -Startup`，或把 `start-panel.vbs` 的快捷方式放进 `shell:startup` 文件夹。删掉那个快捷方式即可取消。

@@ -141,7 +141,7 @@ function Get-StateStyle($state, $live) {
     }
     switch ($state) {
         'running'    { return @{ color = [System.Drawing.Color]::FromArgb(59,130,246);  label = 'Running' } }       # blue
-        'permission' { return @{ color = [System.Drawing.Color]::FromArgb(239,68,68);   label = 'Needs permission' } } # red
+        'permission' { return @{ color = [System.Drawing.Color]::FromArgb(249,115,22);  label = 'Needs permission' } } # orange
         'ask'        { return @{ color = [System.Drawing.Color]::FromArgb(168,85,247);  label = 'Needs answer' } }   # purple
         'done'       { return @{ color = [System.Drawing.Color]::FromArgb(34,197,94);   label = 'Done' } }          # green
         'idle'       { return @{ color = [System.Drawing.Color]::FromArgb(245,158,11);  label = 'Idle' } }          # amber
@@ -316,6 +316,26 @@ function Move-Pin($sid, $delta) {
     Refresh-Rows -force
 }
 
+# Commit a drag-reorder: move the dragged session to the slot under where it was dropped.
+function Commit-Drag {
+    $list = @($script:Pins)
+    $from = [array]::IndexOf($list, [string]$script:dragSid)
+    if ($from -lt 0) { Refresh-Rows -force; return }
+    $target = [int][Math]::Round(($script:dragRow.Top - 4) / $RowH)
+    if ($target -lt 0) { $target = 0 }
+    if ($target -gt ($list.Count - 1)) { $target = $list.Count - 1 }
+    if ($target -ne $from) {
+        $al = New-Object System.Collections.ArrayList
+        [void]$al.AddRange($list)
+        $item = $al[$from]
+        $al.RemoveAt($from)
+        $al.Insert($target, $item)
+        $script:Pins = @($al.ToArray())
+        Save-Config
+    }
+    Refresh-Rows -force
+}
+
 # ------------------------------------------------------------ menu (≡) ------
 $btnMenu.Add_Click({
     $menu = New-Object System.Windows.Forms.ContextMenuStrip
@@ -435,7 +455,7 @@ function Refresh-Rows {
             $name.TextAlign    = 'MiddleLeft'
             $row.Controls.Add($name)
             $shortId = $sid.Substring(0, [Math]::Min(8, $sid.Length))
-            $tipText = "{0}`r`nid {1}`r`nRename: right-click, or type  #name <label>  in the session" -f $s.project, $shortId
+            $tipText = "{0}`r`nid {1}`r`nDrag to reorder. Rename: right-click, or type  #name <label>  in the session." -f $s.project, $shortId
             $script:tip.SetToolTip($name, $tipText)
             $script:tip.SetToolTip($dot, $tipText)
 
@@ -478,6 +498,34 @@ function Refresh-Rows {
             $name.ContextMenuStrip = $rowMenu
             $dot.ContextMenuStrip  = $rowMenu
             $stt.ContextMenuStrip  = $rowMenu
+
+            # Left-drag a row up/down to reorder it.
+            $row.Cursor = 'SizeAll'; $dot.Cursor = 'SizeAll'; $name.Cursor = 'SizeAll'; $stt.Cursor = 'SizeAll'
+            $onDown = {
+                param($snd, $e)
+                if ($e.Button -ne [System.Windows.Forms.MouseButtons]::Left) { return }
+                $script:dragSid     = $sid
+                $script:dragRow     = $row
+                $script:dragOrigTop = $row.Top
+                $script:dragStartY  = [System.Windows.Forms.Cursor]::Position.Y
+                $script:dragRowOn   = $true
+                $row.BringToFront()
+            }.GetNewClosure()
+            $onMove = {
+                param($snd, $e)
+                if (-not $script:dragRowOn) { return }
+                $dy = [System.Windows.Forms.Cursor]::Position.Y - $script:dragStartY
+                $script:dragRow.Top = $script:dragOrigTop + $dy
+            }
+            $onUp = {
+                param($snd, $e)
+                if (-not $script:dragRowOn) { return }
+                $script:dragRowOn = $false
+                if ($script:dragRow.Top -ne $script:dragOrigTop) { Commit-Drag }
+            }
+            foreach ($c in @($row, $dot, $name, $stt)) {
+                $c.Add_MouseDown($onDown); $c.Add_MouseMove($onMove); $c.Add_MouseUp($onUp)
+            }
 
             $content.Controls.Add($row)
             $y += $RowH
