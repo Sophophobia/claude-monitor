@@ -148,21 +148,6 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
 
 > **为什么权限靠时序判断：** 桌面 App 在弹出权限对话框时**不会**触发 `Notification` hook（已实测确认）。所以改成：`PreToolUse` 把会话标记为 pending，当某个工具 pending 超过 `panel.ps1` 里的 `$script:PendingPermMs`（默认 **3000 毫秒**）时面板就变橙——自动批准的工具毫秒级就返回，根本不会变橙。代价：一个真的要跑很久的工具（比如 30 秒的 build）在返回前也会一直显示橙色;嫌烦就把阈值调大。
 
-## 给会话命名
-
-默认显示 `项目文件夹 (短id)`，例如 `MividaDemo (cce08d93)`。想起个有意义的名字，两种方式任选：
-
-- **在会话窗口里**（推荐）：直接打一句
-  ```
-  #name <名字>
-  ```
-  例如 `#name 前端重构`。hook 会抓到它、给这个会话打上标签，并**拦下这条提问、不发给 Claude**（你只会看到一行 “session labelled” 的提示）。想改随时再打一次。它自动绑定到当前会话，你不用去查 id。
-- **在面板里**：右键某一行 → **Rename**；右键 → **Use auto title** 还原成默认。
-
-**优先级：** 面板手动改的名 > `#name` 设的名 > `项目 (短id)`。
-
-> 注意：`#name` 只在「安装 hooks 之后新开的会话」里生效（见下方安装）。桌面 App 侧边栏那个标题用不了：它存在 App 的 IndexedDB 里、挂在内部的 `local_<uuid>` 上，和 hooks 看到的 CLI `session_id` 不是一套，App 也不暴露两者的对应关系。
-
 ## 安装
 
 1. 把整个文件夹拷到目标机器（任意位置）。
@@ -180,6 +165,21 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
 `install.ps1` 会自动定位自己所在文件夹，所以 hook 路径在任何机器上都正确，不受用户名或安装位置影响。它会先把已有的 `settings.json` 备份成 `settings.json.bak`，并保留其他 hooks。
 
 > `~/.claude/settings.json` 是按「用户/设备」走的，**不会在多台机器间同步**，所以每台机器都要跑一次 `install.ps1`。
+
+## 给会话命名
+
+默认显示 `项目文件夹 (短id)`，例如 `MividaDemo (cce08d93)`。想起个有意义的名字，两种方式任选：
+
+- **在会话窗口里**（推荐）：直接打一句
+  ```
+  #name <名字>
+  ```
+  例如 `#name 前端重构`。hook 会抓到它、给这个会话打上标签，并**拦下这条提问、不发给 Claude**（你只会看到一行 “session labelled” 的提示）。想改随时再打一次。它自动绑定到当前会话，你不用去查 id。
+- **在面板里**：右键某一行 → **Rename**；右键 → **Use auto title** 还原成默认。
+
+**优先级：** 面板手动改的名 > `#name` 设的名 > `项目 (短id)`。
+
+> 注意：`#name` 只在「安装 hooks 之后新开的会话」里生效（见上方安装）。桌面 App 侧边栏那个标题用不了：它存在 App 的 IndexedDB 里、挂在内部的 `local_<uuid>` 上，和 hooks 看到的 CLI `session_id` 不是一套，App 也不暴露两者的对应关系。
 
 ## 用法
 
