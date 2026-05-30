@@ -17,12 +17,19 @@ Each pinned session is one row: a colored dot + a label + its current state.
 
 | Dot | State | Meaning | Fired by hook |
 |---|---|---|---|
-| 🔵 | `Running` | Claude is working | `UserPromptSubmit` |
-| 🟠 | `Needs permission` | Waiting for you to approve a tool | `Notification` (permission) |
+| 🔵 | `Running` | Claude is working / a tool is running | `UserPromptSubmit`, `PreToolUse`/`PostToolUse` |
+| 🟠 | `Needs permission` | A tool has been blocked > ~3s — almost always a permission prompt | `PreToolUse` timing (see below) |
 | 🟣 | `Needs answer` | Claude asked you a question | `PreToolUse` (AskUserQuestion) |
-| 🟢 | `Done` | Finished its turn | `Stop` |
-| 🟡 | `Idle` | Idle, waiting for input | `Notification` (idle) / `SessionStart` |
+| 🟢 | `Waiting` | Your turn — finished its reply, or a fresh session | `Stop` / `SessionStart` |
 | ⚪ | `Ended` | Session closed / process gone | `SessionEnd` or pid no longer alive |
+
+> **Why permission is detected by timing:** the desktop app does **not** fire a
+> `Notification` hook when a permission dialog appears (verified). So instead,
+> `PreToolUse` marks the session pending and the panel turns it orange once a
+> tool has been pending longer than `$script:PendingPermMs` in `panel.ps1`
+> (default **3000 ms**) — auto-approved tools return in well under a second and
+> never flip. Caveat: a genuinely long-running approved tool (e.g. a 30s build)
+> also shows orange until it returns; raise the threshold if that is noisy.
 
 ## Naming sessions
 
@@ -88,8 +95,9 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
 ```
 
 - Global hooks in `~/.claude/settings.json` run `status-hook.ps1` on
-  SessionStart / UserPromptSubmit / Stop / Notification / SessionEnd. It writes
-  one tiny JSON file per session and never blocks Claude (always exits 0).
+  SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Stop /
+  Notification / SessionEnd. It writes one tiny JSON file per session and never
+  blocks Claude (always exits 0).
 - `panel.ps1` reads those files plus `~/.claude/sessions/*.json` (for liveness,
   via a pid check) every 1.5 seconds and redraws.
 
@@ -106,10 +114,14 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
 ## Notes & limitations
 
 - State only updates for sessions started **after** the hooks were installed.
-- After you approve a permission prompt, the row stays `Needs permission` until
-  the turn finishes (`Stop` → `Done`); no per-tool event is wired up, to keep
-  hook latency near zero.
-- A pinned session that ends shows `Ended`; menu → "Unpin ended sessions" clears them.
+- `Needs permission` is a timing heuristic (see the table above), so it appears
+  ~3s after a prompt opens and clears the moment you approve/deny (`PostToolUse`
+  → `Running`). Long-running approved tools also show orange meanwhile.
+- A pinned session that ends shows `Ended` and **stays pinned** (it is never
+  auto-dropped); clear it via menu → "Unpin ended sessions" or right-click →
+  Unpin. The desktop app sometimes gives the hook a `session_id` that differs
+  from the one in `~/.claude/sessions/<pid>.json`; the panel rescues such
+  sessions as live by matching `cwd` so they aren't shown `Ended` by mistake.
 - Windows only (PowerShell + WinForms).
 
 ---
@@ -128,12 +140,13 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
 
 | 圆点 | 状态 | 含义 | 触发的 hook |
 |---|---|---|---|
-| 🔵 | `Running` | Claude 正在工作 | `UserPromptSubmit` |
-| 🟠 | `Needs permission` | 等你批准某个工具 | `Notification`（权限） |
+| 🔵 | `Running` | Claude 正在工作 / 工具运行中 | `UserPromptSubmit`、`PreToolUse`/`PostToolUse` |
+| 🟠 | `Needs permission` | 某个工具卡住超过约 3 秒——几乎肯定是在等你授权 | `PreToolUse` 时序（见下） |
 | 🟣 | `Needs answer` | Claude 问了你一个问题 | `PreToolUse`（AskUserQuestion） |
-| 🟢 | `Done` | 它这一轮结束了，轮到你 | `Stop` |
-| 🟡 | `Idle` | 闲置，等待输入 | `Notification`（idle）/ `SessionStart` |
+| 🟢 | `Waiting` | 轮到你了——答完一轮，或刚开的会话 | `Stop` / `SessionStart` |
 | ⚪ | `Ended` | 会话关闭 / 进程没了 | `SessionEnd` 或 pid 已退出 |
+
+> **为什么权限靠时序判断：** 桌面 App 在弹出权限对话框时**不会**触发 `Notification` hook（已实测确认）。所以改成：`PreToolUse` 把会话标记为 pending，当某个工具 pending 超过 `panel.ps1` 里的 `$script:PendingPermMs`（默认 **3000 毫秒**）时面板就变橙——自动批准的工具毫秒级就返回，根本不会变橙。代价：一个真的要跑很久的工具（比如 30 秒的 build）在返回前也会一直显示橙色;嫌烦就把阈值调大。
 
 ## 给会话命名
 
@@ -186,7 +199,7 @@ Claude Code 会话 --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<id
                                   panel.ps1 (每 1.5 秒读一次) --> 悬浮面板
 ```
 
-- `~/.claude/settings.json` 里的全局 hooks 在 SessionStart / UserPromptSubmit / Stop / Notification / SessionEnd 时调用 `status-hook.ps1`，给每个会话写一个很小的 JSON 状态文件，且永不阻塞 Claude（总是 exit 0）。
+- `~/.claude/settings.json` 里的全局 hooks 在 SessionStart / UserPromptSubmit / PreToolUse / PostToolUse / Stop / Notification / SessionEnd 时调用 `status-hook.ps1`，给每个会话写一个很小的 JSON 状态文件，且永不阻塞 Claude（总是 exit 0）。
 - `panel.ps1` 每 1.5 秒读这些文件 + `~/.claude/sessions/*.json`（配合 pid 检查判断存活）并重绘。
 
 ## 文件
@@ -202,6 +215,6 @@ Claude Code 会话 --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<id
 ## 说明 / 局限
 
 - 状态只对「安装 hooks 之后新开的会话」更新。
-- 批准权限后，那一行会一直停在 `Needs permission`，直到该轮结束（`Stop` → `Done`）；为把 hook 延迟降到最低，没有挂逐个工具的事件。
-- pin 的会话结束后显示 `Ended`；菜单 → “Unpin ended sessions” 可清理。
+- `Needs permission` 是时序启发式（见上表），所以弹窗后约 3 秒才变橙，你一批准/拒绝就清掉（`PostToolUse` → `Running`）；其间长工具也会显示橙色。
+- pin 的会话结束后显示 `Ended`，并**保持 pin 不会被自动移除**；用菜单 → “Unpin ended sessions” 或右键 → Unpin 清理。桌面 App 有时给 hook 的 `session_id` 跟 `~/.claude/sessions/<pid>.json` 里的不一致，面板会用 `cwd` 匹配把这类会话救回判为存活，避免被误判成 `Ended`。
 - 仅支持 Windows（PowerShell + WinForms）。
