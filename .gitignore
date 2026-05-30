@@ -3,3 +3,6 @@ config.json
 
 # Backups created by install.ps1
 *.bak
+
+# Local-only assistant guidance / personal workflow notes
+CLAUDE.md
