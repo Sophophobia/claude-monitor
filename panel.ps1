@@ -24,11 +24,21 @@ $SessionDir = Join-Path $Home_ '.claude\sessions'
 # config.json lives next to this script so the whole tool folder is portable.
 $ConfigPath = Join-Path $PSScriptRoot 'config.json'
 
+# How long a tool may stay 'pending' (PreToolUse fired, PostToolUse not yet)
+# before we assume it is blocked on a permission prompt and show orange. The
+# desktop app fires no Notification for permission dialogs, so this timing
+# heuristic is how "Needs permission" is detected. Quick auto-approved tools
+# finish well under this, so they never flip to orange. Tweak to taste.
+$script:PendingPermMs = 3000
+
 # --------------------------------------------------------------- config -----
-$script:Pins  = @()
-$script:PosX  = $null
-$script:PosY  = $null
-$script:Names = @{}   # sessionId -> custom display name (overrides the auto-title)
+$script:Pins    = @()
+$script:PosX    = $null
+$script:PosY    = $null
+$script:Names   = @{}   # sessionId -> custom display name (overrides the auto-title)
+$script:PinInfo = @{}   # sessionId -> @{ project; cwd; title } last-known identity, so an
+                        # ended pin still renders sensibly after its session record is gone.
+$script:pinInfoDirty = $false
 
 function Load-Config {
     try {
@@ -42,6 +52,18 @@ function Load-Config {
                 foreach ($p in $c.names.PSObject.Properties) { $h[$p.Name] = [string]$p.Value }
                 $script:Names = $h
             }
+            if ($c.pinInfo) {
+                $h = @{}
+                foreach ($p in $c.pinInfo.PSObject.Properties) {
+                    $v = $p.Value
+                    $h[$p.Name] = @{
+                        project = [string]$v.project
+                        cwd     = [string]$v.cwd
+                        title   = [string]$v.title
+                    }
+                }
+                $script:PinInfo = $h
+            }
         }
     } catch { }
 }
@@ -49,10 +71,11 @@ function Load-Config {
 function Save-Config {
     try {
         $obj = [ordered]@{
-            pins  = @($script:Pins)
-            x     = $script:PosX
-            y     = $script:PosY
-            names = $script:Names
+            pins    = @($script:Pins)
+            x       = $script:PosX
+            y       = $script:PosY
+            names   = $script:Names
+            pinInfo = $script:PinInfo
         }
         ($obj | ConvertTo-Json -Compress) | Set-Content -Path $ConfigPath -Encoding UTF8
     } catch { }
@@ -91,7 +114,7 @@ function Get-Sessions {
                     project   = $proj
                     cwd       = [string]$j.cwd
                     title     = ''
-                    state     = 'idle'
+                    state     = 'waiting'
                     message   = ''
                     live      = $isLive
                     updatedAt = 0
@@ -99,6 +122,19 @@ function Get-Sessions {
             } catch { }
         }
     }
+
+    # Set of cwds that currently host a live session record. Used to rescue
+    # "orphan" status files: the desktop app sometimes gives the hook a
+    # session_id that differs from the sessionId Claude writes into
+    # sessions/<pid>.json for the SAME window, so an active session's status
+    # file has no id-match here and would otherwise look ended.
+    $liveCwds = @{}
+    foreach ($k in @($map.Keys)) {
+        $e = $map[$k]
+        if ($e.live -and $e.cwd) { $liveCwds[([string]$e.cwd).ToLower()] = $true }
+    }
+    $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $staleMs = 6 * 60 * 60 * 1000   # 6h: a status file not updated this long is treated as ended
 
     # 2) Overlay status files (the real run-state)
     if (Test-Path $StatusDir) {
@@ -115,7 +151,13 @@ function Get-Sessions {
                     if (-not $map[$sid].project -and $j.project) { $map[$sid].project = [string]$j.project }
                     if (-not $map[$sid].cwd -and $j.cwd) { $map[$sid].cwd = [string]$j.cwd }
                 } else {
-                    # Status file with no live session record -> treat as ended.
+                    # No id-match in sessions/*.json. A status file only exists
+                    # while the session is alive (SessionEnd deletes it), so
+                    # treat it as live if either another live session shares its
+                    # cwd (same window, different id) or it was updated recently.
+                    $ts      = [long]$j.updatedAt
+                    $cwdLive = $j.cwd -and $liveCwds.ContainsKey(([string]$j.cwd).ToLower())
+                    $fresh   = ($ts -gt 0) -and (($nowMs - $ts) -lt $staleMs)
                     $map[$sid] = [pscustomobject]@{
                         sid       = $sid
                         project   = [string]$j.project
@@ -123,15 +165,60 @@ function Get-Sessions {
                         title     = [string]$j.title
                         state     = [string]$j.state
                         message   = [string]$j.message
-                        live      = $false
-                        updatedAt = [long]$j.updatedAt
+                        live      = [bool]($cwdLive -or $fresh)
+                        updatedAt = $ts
                     }
                 }
             } catch { }
         }
     }
 
+    # Escalate 'pending' tools to 'permission'. A tool that has been pending
+    # longer than the threshold is almost certainly blocked on a permission
+    # prompt (auto-approved tools return in well under a second); until then it
+    # is just normal work, so keep it 'running'. Recomputed every refresh.
+    foreach ($k in @($map.Keys)) {
+        $e = $map[$k]
+        if ($e.state -eq 'pending') {
+            if ($e.updatedAt -gt 0 -and ($nowMs - $e.updatedAt) -ge $script:PendingPermMs) {
+                $e.state = 'permission'
+            } else {
+                $e.state = 'running'
+            }
+        }
+    }
+
     return $map
+}
+
+# Resolve a pinned session to a row object. If it is still present in $all we
+# use that and refresh its remembered identity; if it has vanished (status file
+# deleted on SessionEnd, or a transient read error) we DON'T drop it -- we
+# synthesize an "Ended" row from the last-known project/title instead.
+function Resolve-Pin($sid, $all) {
+    if ($all.ContainsKey($sid)) {
+        $s = $all[$sid]
+        $prev = $script:PinInfo[$sid]
+        if (-not $prev -or
+            [string]$prev.project -ne [string]$s.project -or
+            [string]$prev.cwd     -ne [string]$s.cwd -or
+            [string]$prev.title   -ne [string]$s.title) {
+            $script:PinInfo[$sid] = @{ project = [string]$s.project; cwd = [string]$s.cwd; title = [string]$s.title }
+            $script:pinInfoDirty = $true
+        }
+        return $s
+    }
+    $info = $script:PinInfo[$sid]
+    return [pscustomobject]@{
+        sid       = $sid
+        project   = if ($info) { [string]$info.project } else { '' }
+        cwd       = if ($info) { [string]$info.cwd }     else { '' }
+        title     = if ($info) { [string]$info.title }   else { '' }
+        state     = 'ended'
+        message   = ''
+        live      = $false
+        updatedAt = 0
+    }
 }
 
 # state -> color + label
@@ -141,10 +228,13 @@ function Get-StateStyle($state, $live) {
     }
     switch ($state) {
         'running'    { return @{ color = [System.Drawing.Color]::FromArgb(59,130,246);  label = 'Running' } }       # blue
+        'pending'    { return @{ color = [System.Drawing.Color]::FromArgb(59,130,246);  label = 'Running' } }       # blue (escalates to permission in Get-Sessions)
         'permission' { return @{ color = [System.Drawing.Color]::FromArgb(249,115,22);  label = 'Needs permission' } } # orange
         'ask'        { return @{ color = [System.Drawing.Color]::FromArgb(168,85,247);  label = 'Needs answer' } }   # purple
-        'done'       { return @{ color = [System.Drawing.Color]::FromArgb(34,197,94);   label = 'Done' } }          # green
-        'idle'       { return @{ color = [System.Drawing.Color]::FromArgb(245,158,11);  label = 'Idle' } }          # amber
+        # done + idle are merged into one "waiting" state (green).
+        'waiting'    { return @{ color = [System.Drawing.Color]::FromArgb(34,197,94);   label = 'Waiting' } }        # green
+        'done'       { return @{ color = [System.Drawing.Color]::FromArgb(34,197,94);   label = 'Waiting' } }        # green (legacy)
+        'idle'       { return @{ color = [System.Drawing.Color]::FromArgb(34,197,94);   label = 'Waiting' } }        # green (legacy)
         default      { return @{ color = [System.Drawing.Color]::FromArgb(148,163,184); label = 'Live' } }          # slate
     }
 }
@@ -389,21 +479,18 @@ function Refresh-Rows {
 
     $all = Get-Sessions
 
-    # Auto-drop pins whose session vanished entirely (no status file, no live record).
-    $known = @($script:Pins | Where-Object { $all.ContainsKey($_) })
-    if (@($known).Count -ne @($script:Pins).Count) {
-        $script:Pins = $known
-        Save-Config
-    }
+    # Never permanently unpin a session just because it vanished from $all. An
+    # ended session loses its sessions/<pid>.json and its status file, so it
+    # would otherwise be dropped forever instead of shown as "Ended". Pins are
+    # only removed via the explicit "Unpin ended sessions" menu or per-row Unpin.
 
     # Signature to avoid needless rebuilds (no flicker when nothing changed).
     $sig = ($script:Pins | ForEach-Object {
-        $s = $all[$_]
-        if ($s) {
-            $nm = if ($script:Names.ContainsKey($_)) { $script:Names[$_] } else { '' }
-            '{0}:{1}:{2}:{3}:{4}' -f $_, $s.state, $s.live, $s.title, $nm
-        } else { "$_:gone" }
+        $s = Resolve-Pin $_ $all
+        $nm = if ($script:Names.ContainsKey($_)) { $script:Names[$_] } else { '' }
+        '{0}:{1}:{2}:{3}:{4}' -f $_, $s.state, $s.live, $s.title, $nm
     }) -join '|'
+    if ($script:pinInfoDirty) { Save-Config; $script:pinInfoDirty = $false }
     if (-not $force -and $sig -eq $script:lastSig) { return }
     $script:lastSig = $sig
 
@@ -425,7 +512,7 @@ function Refresh-Rows {
         $y = 4
         $rowIdx = 0
         foreach ($sid in $rows) {
-            $s = $all[$sid]
+            $s = Resolve-Pin $sid $all
             $st = Get-StateStyle $s.state $s.live
 
             $row = New-Object System.Windows.Forms.Panel

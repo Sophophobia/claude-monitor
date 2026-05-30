@@ -26,6 +26,20 @@ try {
     $sr.Dispose()
     if ([string]::IsNullOrWhiteSpace($raw)) { exit 0 }
 
+    # Optional debugging: append every raw payload to
+    # ~/.claude/session-status/_debug.log. Enable either by setting
+    # $env:CLAUDE_MONITOR_DEBUG=1, or by creating an empty marker file
+    # ~/.claude/session-status/_debug.on (no restart needed). Use this to
+    # confirm what fields a real permission prompt actually sends (TODO item 1).
+    $dbgDir = Join-Path $env:USERPROFILE '.claude\session-status'
+    if ($env:CLAUDE_MONITOR_DEBUG -or (Test-Path (Join-Path $dbgDir '_debug.on'))) {
+        try {
+            if (-not (Test-Path $dbgDir)) { New-Item -ItemType Directory -Path $dbgDir -Force | Out-Null }
+            $line = ('{0} [{1}] {2}' -f (Get-Date -Format 'o'), $Event, ($raw -replace '\s+', ' '))
+            Add-Content -Path (Join-Path $dbgDir '_debug.log') -Value $line -Encoding UTF8
+        } catch { }
+    }
+
     $j = $raw | ConvertFrom-Json
     $sid = $j.session_id
     if ([string]::IsNullOrWhiteSpace($sid)) { exit 0 }
@@ -66,16 +80,41 @@ try {
         $title = $label
     }
 
-    $state = $Event          # running | done | idle | ask  (passed verbatim)
+    # Map the incoming -Event to a panel state.
+    #   running  : Claude is working (prompt submitted, or continuing after a tool)
+    #   waiting  : Claude's turn is over / fresh session -> your turn (green)
+    #   pending  : a tool is about to run. The panel keeps this blue (Running)
+    #              but escalates it to orange "Needs permission" if it stays
+    #              pending for more than a few seconds -- the desktop app does
+    #              NOT fire a Notification hook for permission prompts, so this
+    #              "tool stuck waiting" heuristic is how we detect them.
+    #   ask      : an AskUserQuestion tool is open -> needs your answer (purple)
+    $state = $Event
     $message = ''
-    if ($Event -eq 'notify') {
-        switch -Wildcard ([string]$j.notification_type) {
-            'permission*'        { $state = 'permission' }   # needs your approval
-            'elicitation_dialog' { $state = 'ask' }          # MCP form: needs your answer
-            'idle*'              { $state = 'idle' }          # idle, waiting for input
-            default              { $state = if ($prevState) { $prevState } else { 'idle' } }
+    switch ($Event) {
+        'pretool' {
+            if (([string]$j.tool_name) -eq 'AskUserQuestion') { $state = 'ask' }
+            else { $state = 'pending' }
         }
-        if ($j.message) { $message = [string]$j.message }
+        'posttool' { $state = 'running' }   # tool finished; Claude keeps working
+        'notify' {
+            # Bonus path: if a Notification ever does fire, classify it. The
+            # payload's `message` is the reliable field; `notification_type` is
+            # often absent on the desktop app.
+            $ntype = [string]$j.notification_type
+            $msg   = [string]$j.message
+            if ($msg) { $message = $msg }
+
+            if ($ntype -like 'permission*' -or $msg -match '(?i)permission|needs your (approval|permission)') {
+                $state = 'permission'                          # needs your approval
+            } elseif ($ntype -eq 'elicitation_dialog') {
+                $state = 'ask'                                 # MCP form: needs your answer
+            } elseif ($ntype -like 'idle*' -or $msg -match '(?i)waiting for your input|is waiting') {
+                $state = 'waiting'                             # waiting, your turn
+            } else {
+                $state = if ($prevState) { $prevState } else { 'waiting' }
+            }
+        }
     }
     # A label command is not real work, so keep whatever state we were in.
     if ($isMarker -and $prevState) { $state = $prevState }

@@ -54,17 +54,21 @@ if (-not ($root -is [System.Collections.IDictionary])) { $root = [ordered]@{} }
 if (-not $root.Contains('hooks')) { $root['hooks'] = [ordered]@{} }
 $hooks = $root['hooks']
 
-# event, -Event argument, and optional tool matcher.
-# AskUserQuestion does not fire Notification, so we catch "needs your answer"
-# via PreToolUse (set 'ask') and clear it via PostToolUse (back to 'running').
+# event -> -Event argument (matcher is null = all tools/events).
+# The desktop app does NOT fire a Notification hook for permission prompts, so
+# we detect "needs permission" from tool timing instead: PreToolUse marks the
+# session 'pending' and the panel escalates it to orange if a tool stays pending
+# for more than a few seconds (a real permission dialog blocks PostToolUse).
+# PreToolUse also classifies AskUserQuestion (-> 'ask') by reading tool_name, so
+# no per-tool matcher is needed. SessionStart/Stop share the merged 'waiting'.
 $events = @(
-    @{ evt = 'SessionStart';     arg = 'idle';    matcher = $null }
-    @{ evt = 'UserPromptSubmit'; arg = 'running'; matcher = $null }
-    @{ evt = 'Stop';             arg = 'done';    matcher = $null }
-    @{ evt = 'Notification';     arg = 'notify';  matcher = $null }
-    @{ evt = 'SessionEnd';       arg = 'end';     matcher = $null }
-    @{ evt = 'PreToolUse';       arg = 'ask';     matcher = 'AskUserQuestion' }
-    @{ evt = 'PostToolUse';      arg = 'running'; matcher = 'AskUserQuestion' }
+    @{ evt = 'SessionStart';     arg = 'waiting';  matcher = $null }
+    @{ evt = 'UserPromptSubmit'; arg = 'running';  matcher = $null }
+    @{ evt = 'PreToolUse';       arg = 'pretool';  matcher = $null }
+    @{ evt = 'PostToolUse';      arg = 'posttool'; matcher = $null }
+    @{ evt = 'Stop';             arg = 'waiting';  matcher = $null }
+    @{ evt = 'Notification';     arg = 'notify';   matcher = $null }
+    @{ evt = 'SessionEnd';       arg = 'end';      matcher = $null }
 )
 
 foreach ($e in $events) {
