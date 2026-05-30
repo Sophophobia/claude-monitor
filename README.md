@@ -31,6 +31,27 @@ Each pinned session is one row: a colored dot + a label + its current state.
 > never flip. Caveat: a genuinely long-running approved tool (e.g. a 30s build)
 > also shows orange until it returns; raise the threshold if that is noisy.
 
+## Install
+
+1. Copy this whole folder to the machine (anywhere).
+2. Run setup once (PowerShell):
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File ".\install.ps1"
+   ```
+   Add `-Startup` to also launch the panel automatically at login:
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File ".\install.ps1" -Startup
+   ```
+3. **Restart any open Claude Code sessions** so the hooks take effect.
+4. Double-click `start-panel.vbs` to show the panel.
+
+`install.ps1` figures out its own folder, so the hook paths are always correct
+for that machine regardless of username or install location. It backs up any
+existing `settings.json` to `settings.json.bak` and preserves other hooks.
+
+> `~/.claude/settings.json` is per-user / per-device and is **not** synced between
+> machines, so each machine needs `install.ps1` run once.
+
 ## Naming sessions
 
 By default a row shows `project-folder (shortid)`, e.g. `MividaDemo (cce08d93)`.
@@ -53,27 +74,6 @@ To give a session a meaningful name, use either method:
 > (see Install). The desktop app's own sidebar titles cannot be reused: they live
 > in the app's IndexedDB under an internal `local_<uuid>` id, a different id space
 > from the CLI `session_id` the hooks see, with no exposed mapping.
-
-## Install
-
-1. Copy this whole folder to the machine (anywhere).
-2. Run setup once (PowerShell):
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File ".\install.ps1"
-   ```
-   Add `-Startup` to also launch the panel automatically at login:
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File ".\install.ps1" -Startup
-   ```
-3. **Restart any open Claude Code sessions** so the hooks take effect.
-4. Double-click `start-panel.vbs` to show the panel.
-
-`install.ps1` figures out its own folder, so the hook paths are always correct
-for that machine regardless of username or install location. It backs up any
-existing `settings.json` to `settings.json.bak` and preserves other hooks.
-
-> `~/.claude/settings.json` is per-user / per-device and is **not** synced between
-> machines, so each machine needs `install.ps1` run once.
 
 ## Usage
 
