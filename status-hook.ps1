@@ -57,13 +57,23 @@ try {
     # Preserve an existing custom label (set via "#name") and prior state.
     $title = ''
     $prevState = ''
+    $transcriptPath = ''
     if (Test-Path $file) {
         try {
             $prev = Get-Content $file -Raw -ErrorAction Stop | ConvertFrom-Json
             if ($prev.title) { $title = [string]$prev.title }
             if ($prev.state) { $prevState = [string]$prev.state }
+            if ($prev.transcriptPath) { $transcriptPath = [string]$prev.transcriptPath }
         } catch { }
     }
+
+    # The hook payload carries the path to this session's conversation transcript
+    # (~/.claude/projects/<mangled-cwd>/<session_id>.jsonl). The panel uses its
+    # existence to tell a backgrounded/idle conversation (transcript still on
+    # disk -> stay "Waiting") apart from a deleted one (transcript gone ->
+    # "Ended"), because the desktop app fires SessionEnd for both. Keep the last
+    # known path if a given event omits it.
+    if ($j.transcript_path) { $transcriptPath = [string]$j.transcript_path }
 
     $cwd = [string]$j.cwd
     $proj = ''
@@ -120,13 +130,14 @@ try {
     if ($isMarker -and $prevState) { $state = $prevState }
 
     $obj = [ordered]@{
-        sessionId = $sid
-        cwd       = $cwd
-        project   = $proj
-        title     = $title
-        state     = $state
-        message   = $message
-        updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        sessionId      = $sid
+        cwd            = $cwd
+        project        = $proj
+        title          = $title
+        state          = $state
+        message        = $message
+        transcriptPath = $transcriptPath
+        updatedAt      = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     }
 
     # Write atomically (write tmp, then move over) so the panel never reads a

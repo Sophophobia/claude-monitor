@@ -57,9 +57,10 @@ function Load-Config {
                 foreach ($p in $c.pinInfo.PSObject.Properties) {
                     $v = $p.Value
                     $h[$p.Name] = @{
-                        project = [string]$v.project
-                        cwd     = [string]$v.cwd
-                        title   = [string]$v.title
+                        project        = [string]$v.project
+                        cwd            = [string]$v.cwd
+                        title          = [string]$v.title
+                        transcriptPath = [string]$v.transcriptPath
                     }
                 }
                 $script:PinInfo = $h
@@ -90,6 +91,24 @@ function Get-Display($sid, $s) {
     return $short
 }
 
+# A conversation's transcript file (~/.claude/projects/<mangled-cwd>/<sid>.jsonl)
+# stays on disk while the conversation merely sits idle / backgrounded, and is
+# only removed when the conversation is deleted. The desktop app fires
+# SessionEnd (which deletes our status file) for BOTH cases, so transcript
+# existence is what lets us keep an idle conversation as "Waiting" and reserve
+# "Ended" for a genuinely deleted one.
+$script:ProjectsDir = Join-Path $Home_ '.claude\projects'
+function Test-TranscriptAlive($sid, $tpath) {
+    try {
+        if ($tpath -and (Test-Path $tpath)) { return $true }
+        if ($sid -and (Test-Path $script:ProjectsDir)) {
+            $hit = Get-ChildItem -Path $script:ProjectsDir -Filter ($sid + '.jsonl') -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($hit) { return $true }
+        }
+    } catch { }
+    return $false
+}
+
 # ----------------------------------------------------- data acquisition -----
 # Returns hashtable: sessionId -> [pscustomobject]@{ sid, project, cwd, state, message, live, updatedAt }
 function Get-Sessions {
@@ -110,14 +129,15 @@ function Get-Sessions {
                 $proj = ''
                 if ($j.cwd) { $proj = Split-Path $j.cwd -Leaf }
                 $map[$sid] = [pscustomobject]@{
-                    sid       = $sid
-                    project   = $proj
-                    cwd       = [string]$j.cwd
-                    title     = ''
-                    state     = 'waiting'
-                    message   = ''
-                    live      = $isLive
-                    updatedAt = 0
+                    sid            = $sid
+                    project        = $proj
+                    cwd            = [string]$j.cwd
+                    title          = ''
+                    state          = 'waiting'
+                    message        = ''
+                    transcriptPath = ''
+                    live           = $isLive
+                    updatedAt      = 0
                 }
             } catch { }
         }
@@ -147,6 +167,7 @@ function Get-Sessions {
                     $map[$sid].state     = [string]$j.state
                     $map[$sid].message   = [string]$j.message
                     $map[$sid].updatedAt = [long]$j.updatedAt
+                    if ($j.transcriptPath) { $map[$sid].transcriptPath = [string]$j.transcriptPath }
                     if ($j.title) { $map[$sid].title = [string]$j.title }
                     if (-not $map[$sid].project -and $j.project) { $map[$sid].project = [string]$j.project }
                     if (-not $map[$sid].cwd -and $j.cwd) { $map[$sid].cwd = [string]$j.cwd }
@@ -159,14 +180,15 @@ function Get-Sessions {
                     $cwdLive = $j.cwd -and $liveCwds.ContainsKey(([string]$j.cwd).ToLower())
                     $fresh   = ($ts -gt 0) -and (($nowMs - $ts) -lt $staleMs)
                     $map[$sid] = [pscustomobject]@{
-                        sid       = $sid
-                        project   = [string]$j.project
-                        cwd       = [string]$j.cwd
-                        title     = [string]$j.title
-                        state     = [string]$j.state
-                        message   = [string]$j.message
-                        live      = [bool]($cwdLive -or $fresh)
-                        updatedAt = $ts
+                        sid            = $sid
+                        project        = [string]$j.project
+                        cwd            = [string]$j.cwd
+                        title          = [string]$j.title
+                        state          = [string]$j.state
+                        message        = [string]$j.message
+                        transcriptPath = [string]$j.transcriptPath
+                        live           = [bool]($cwdLive -or $fresh)
+                        updatedAt      = $ts
                     }
                 }
             } catch { }
@@ -200,24 +222,37 @@ function Resolve-Pin($sid, $all) {
         $s = $all[$sid]
         $prev = $script:PinInfo[$sid]
         if (-not $prev -or
-            [string]$prev.project -ne [string]$s.project -or
-            [string]$prev.cwd     -ne [string]$s.cwd -or
-            [string]$prev.title   -ne [string]$s.title) {
-            $script:PinInfo[$sid] = @{ project = [string]$s.project; cwd = [string]$s.cwd; title = [string]$s.title }
+            [string]$prev.project        -ne [string]$s.project -or
+            [string]$prev.cwd            -ne [string]$s.cwd -or
+            [string]$prev.title          -ne [string]$s.title -or
+            [string]$prev.transcriptPath -ne [string]$s.transcriptPath) {
+            $script:PinInfo[$sid] = @{
+                project        = [string]$s.project
+                cwd            = [string]$s.cwd
+                title          = [string]$s.title
+                transcriptPath = [string]$s.transcriptPath
+            }
             $script:pinInfoDirty = $true
         }
         return $s
     }
-    $info = $script:PinInfo[$sid]
+    # Not in $all: the status file is gone (SessionEnd deleted it). The
+    # conversation may merely be idle/backgrounded, or genuinely deleted. Its
+    # transcript file tells them apart: present -> still "Waiting" (green),
+    # gone -> truly "Ended" (gray).
+    $info  = $script:PinInfo[$sid]
+    $tpath = if ($info) { [string]$info.transcriptPath } else { '' }
+    $alive = Test-TranscriptAlive $sid $tpath
     return [pscustomobject]@{
-        sid       = $sid
-        project   = if ($info) { [string]$info.project } else { '' }
-        cwd       = if ($info) { [string]$info.cwd }     else { '' }
-        title     = if ($info) { [string]$info.title }   else { '' }
-        state     = 'ended'
-        message   = ''
-        live      = $false
-        updatedAt = 0
+        sid            = $sid
+        project        = if ($info) { [string]$info.project } else { '' }
+        cwd            = if ($info) { [string]$info.cwd }     else { '' }
+        title          = if ($info) { [string]$info.title }   else { '' }
+        transcriptPath = $tpath
+        state          = if ($alive) { 'waiting' } else { 'ended' }
+        message        = ''
+        live           = $alive
+        updatedAt      = 0
     }
 }
 
@@ -459,7 +494,9 @@ $btnMenu.Add_Click({
     $clean = New-Object System.Windows.Forms.ToolStripMenuItem('Unpin ended sessions')
     $clean.Add_Click({
         $all2 = Get-Sessions
-        $script:Pins = @($script:Pins | Where-Object { $all2.ContainsKey($_) -and $all2[$_].live })
+        # Keep any pin that resolves to a non-ended row (live session, or an idle
+        # conversation whose transcript still exists); drop only truly ended ones.
+        $script:Pins = @($script:Pins | Where-Object { (Resolve-Pin $_ $all2).state -ne 'ended' })
         Save-Config
         Refresh-Rows -force
     })

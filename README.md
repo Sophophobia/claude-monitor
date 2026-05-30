@@ -21,7 +21,7 @@ Each pinned session is one row: a colored dot + a label + its current state.
 | 🟠 | `Needs permission` | A tool has been blocked > ~3s — almost always a permission prompt | `PreToolUse` timing (see below) |
 | 🟣 | `Needs answer` | Claude asked you a question | `PreToolUse` (AskUserQuestion) |
 | 🟢 | `Waiting` | Your turn — finished its reply, or a fresh session | `Stop` / `SessionStart` |
-| ⚪ | `Ended` | Session closed / process gone | `SessionEnd` or pid no longer alive |
+| ⚪ | `Ended` | Conversation **deleted** (its transcript is gone) | transcript file no longer on disk |
 
 > **Why permission is detected by timing:** the desktop app does **not** fire a
 > `Notification` hook when a permission dialog appears (verified). So instead,
@@ -122,7 +122,17 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
   Unpin. The desktop app sometimes gives the hook a `session_id` that differs
   from the one in `~/.claude/sessions/<pid>.json`; the panel rescues such
   sessions as live by matching `cwd` so they aren't shown `Ended` by mistake.
+- **Idle ≠ ended.** The desktop app fires `SessionEnd` even when you just leave a
+  conversation idle/backgrounded, not only when you delete it. So `Ended` is
+  decided by whether the conversation's **transcript file**
+  (`~/.claude/projects/**/<id>.jsonl`) still exists: an idle conversation keeps
+  its transcript and stays `Waiting`; only deleting the conversation removes the
+  transcript and flips the row to `Ended`.
 - Windows only (PowerShell + WinForms).
+
+## License
+
+[MIT](LICENSE) © Sophophobia
 
 ---
 
@@ -144,7 +154,7 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
 | 🟠 | `Needs permission` | 某个工具卡住超过约 3 秒——几乎肯定是在等你授权 | `PreToolUse` 时序（见下） |
 | 🟣 | `Needs answer` | Claude 问了你一个问题 | `PreToolUse`（AskUserQuestion） |
 | 🟢 | `Waiting` | 轮到你了——答完一轮，或刚开的会话 | `Stop` / `SessionStart` |
-| ⚪ | `Ended` | 会话关闭 / 进程没了 | `SessionEnd` 或 pid 已退出 |
+| ⚪ | `Ended` | 对话被**删除**（transcript 文件没了） | 磁盘上 transcript 文件已不存在 |
 
 > **为什么权限靠时序判断：** 桌面 App 在弹出权限对话框时**不会**触发 `Notification` hook（已实测确认）。所以改成：`PreToolUse` 把会话标记为 pending，当某个工具 pending 超过 `panel.ps1` 里的 `$script:PendingPermMs`（默认 **3000 毫秒**）时面板就变橙——自动批准的工具毫秒级就返回，根本不会变橙。代价：一个真的要跑很久的工具（比如 30 秒的 build）在返回前也会一直显示橙色;嫌烦就把阈值调大。
 
@@ -217,4 +227,9 @@ Claude Code 会话 --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<id
 - 状态只对「安装 hooks 之后新开的会话」更新。
 - `Needs permission` 是时序启发式（见上表），所以弹窗后约 3 秒才变橙，你一批准/拒绝就清掉（`PostToolUse` → `Running`）；其间长工具也会显示橙色。
 - pin 的会话结束后显示 `Ended`，并**保持 pin 不会被自动移除**；用菜单 → “Unpin ended sessions” 或右键 → Unpin 清理。桌面 App 有时给 hook 的 `session_id` 跟 `~/.claude/sessions/<pid>.json` 里的不一致，面板会用 `cwd` 匹配把这类会话救回判为存活，避免被误判成 `Ended`。
+- **挂着 ≠ 结束。** 桌面 App 在你只是把对话晾在一边/切到后台时也会触发 `SessionEnd`，不只是删除时才触发。所以 `Ended` 是靠对话的 **transcript 文件**（`~/.claude/projects/**/<id>.jsonl`）是否还在判断的：挂着的对话 transcript 还在，会一直显示 `Waiting`；只有删掉对话、transcript 没了，这一行才会变成 `Ended`。
 - 仅支持 Windows（PowerShell + WinForms）。
+
+## 许可证
+
+[MIT](LICENSE) © Sophophobia
