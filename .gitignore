@@ -9,3 +9,6 @@ CLAUDE.md
 
 # Local-only issue tracker (contains real project/session names)
 TODO.md
+
+# Per-machine Claude Code project settings (local permissions etc.)
+.claude/
