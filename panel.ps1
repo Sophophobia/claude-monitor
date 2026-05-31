@@ -221,6 +221,11 @@ function Resolve-Pin($sid, $all) {
     if ($all.ContainsKey($sid)) {
         $s = $all[$sid]
         $prev = $script:PinInfo[$sid]
+        # The live status file may have lost its "#name" title (it is recreated
+        # empty after the desktop app fires SessionEnd on idle). Don't revert to
+        # the auto name: fall back to the last-known cached label. status-hook
+        # also re-injects it from the label file, but this covers the gap.
+        if (-not $s.title -and $prev -and $prev.title) { $s.title = [string]$prev.title }
         if (-not $prev -or
             [string]$prev.project        -ne [string]$s.project -or
             [string]$prev.cwd            -ne [string]$s.cwd -or

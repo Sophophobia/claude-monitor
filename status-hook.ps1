@@ -47,8 +47,16 @@ try {
     $dir = Join-Path $env:USERPROFILE '.claude\session-status'
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     $file = Join-Path $dir ($sid + '.json')
+    # A "#name" label is durable session metadata, so it is also stored in its
+    # own tiny file that, unlike the status file, is NOT deleted on SessionEnd.
+    # The desktop app fires SessionEnd whenever a conversation goes idle, which
+    # used to drop the label: the status file (and its title) was deleted, then
+    # recreated empty on resume, reverting the panel to the auto name. Keeping
+    # the label out-of-band lets us re-inject it after any SessionEnd.
+    $labelFile = Join-Path $dir ($sid + '.label')
 
-    # Session ended: remove the status file and bail.
+    # Session ended: remove the status file but KEEP the label so the name
+    # survives an idle/backgrounded conversation coming back.
     if ($Event -eq 'end') {
         Remove-Item $file -Force -ErrorAction SilentlyContinue
         exit 0
@@ -65,6 +73,12 @@ try {
             if ($prev.state) { $prevState = [string]$prev.state }
             if ($prev.transcriptPath) { $transcriptPath = [string]$prev.transcriptPath }
         } catch { }
+    }
+
+    # If the status file carried no title (e.g. it was just recreated after a
+    # SessionEnd), recover the persisted "#name" label from its label file.
+    if (-not $title -and (Test-Path $labelFile)) {
+        try { $title = (Get-Content $labelFile -Raw -ErrorAction Stop).Trim() } catch { }
     }
 
     # The hook payload carries the path to this session's conversation transcript
@@ -88,6 +102,8 @@ try {
         $label = (($matches[1]) -replace '\s+', ' ').Trim()
         if ($label.Length -gt 60) { $label = $label.Substring(0, 60) }
         $title = $label
+        # Persist the label out-of-band so it survives SessionEnd / restarts.
+        try { Set-Content -Path $labelFile -Value $title -Encoding UTF8 -NoNewline } catch { }
     }
 
     # Map the incoming -Event to a panel state.
