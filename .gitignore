@@ -6,3 +6,6 @@ config.json
 
 # Local-only assistant guidance / personal workflow notes
 CLAUDE.md
+
+# Local-only issue tracker (contains real project/session names)
+TODO.md
