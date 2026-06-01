@@ -65,8 +65,15 @@ To give a session a meaningful name, use either method:
   session, and **blocks the prompt so Claude never processes it** (you just see a
   small "session labelled" confirmation). Re-run any time to change it. It binds
   to the correct session automatically, so you never look up an id.
+- **Set the group too:** `#group <group name>` puts the session in a group
+  (creating it if new). You can do both in one prompt, in any order, e.g.
+  `#name Frontend refactor #group Career` or `#group Career`.
 - **From the panel:** right-click a row → **Rename**. Right-click → **Use auto
   title** clears it.
+
+Naming or grouping a session with `#name` / `#group` also **auto-pins it** to
+the panel, so you do not have to add it from the menu first. (Unpin it manually
+and it stays unpinned; a later manual drag to another group is never overridden.)
 
 **Label priority:** panel custom name > `#name` label > `project (shortid)`.
 
@@ -194,7 +201,10 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
   #name <名字>
   ```
   例如 `#name 前端重构`。hook 会抓到它、给这个会话打上标签，并**拦下这条提问、不发给 Claude**（你只会看到一行 “session labelled” 的提示）。想改随时再打一次。它自动绑定到当前会话，你不用去查 id。
+- **顺便设分组：** `#group <组名>` 把会话归到某个分组（不存在就新建）。两者可一行连写、顺序随意，例如 `#name 前端重构 #group 职业` 或单独 `#group 职业`。
 - **在面板里**：右键某一行 → **Rename**；右键 → **Use auto title** 还原成默认。
+
+用 `#name` / `#group` 命名或分组后，会**自动把该会话加进面板**，不用先去菜单里勾选。（你手动取消后它就不再被自动加回；之后手动拖到别的分组也不会被覆盖。）
 
 **优先级：** 面板手动改的名 > `#name` 设的名 > `项目 (短id)`。
 

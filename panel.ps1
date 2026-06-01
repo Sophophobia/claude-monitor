@@ -46,6 +46,13 @@ $script:GroupOrder = @()   # ordered list of group names (display order of group
 $script:Collapsed  = @{}   # group name -> $true if collapsed
 $script:UngroupedName = 'Ungrouped'   # header shown for sessions in no group (only when groups exist)
 
+# In-session "#name"/"#group" commands feed these. AutoPinned: sids we have
+# already auto-pinned (or that the user has since unpinned) so we don't re-pin
+# them. GroupCmd: the last "#group" value we applied per sid, used as a latch so
+# a fresh "#group" re-groups but a later manual move is not overridden.
+$script:AutoPinned = @{}
+$script:GroupCmd   = @{}
+
 function Load-Config {
     try {
         if (Test-Path $ConfigPath) {
@@ -82,6 +89,16 @@ function Load-Config {
                 foreach ($p in $c.collapsed.PSObject.Properties) { $h[$p.Name] = [bool]$p.Value }
                 $script:Collapsed = $h
             }
+            if ($c.autoPinned) {
+                $h = @{}
+                foreach ($p in $c.autoPinned.PSObject.Properties) { $h[$p.Name] = [bool]$p.Value }
+                $script:AutoPinned = $h
+            }
+            if ($c.groupCmd) {
+                $h = @{}
+                foreach ($p in $c.groupCmd.PSObject.Properties) { $h[$p.Name] = [string]$p.Value }
+                $script:GroupCmd = $h
+            }
         }
     } catch { }
 }
@@ -97,6 +114,8 @@ function Save-Config {
             groups     = $script:Groups
             groupOrder = @($script:GroupOrder)
             collapsed  = $script:Collapsed
+            autoPinned = $script:AutoPinned
+            groupCmd   = $script:GroupCmd
         }
         ($obj | ConvertTo-Json -Compress) | Set-Content -Path $ConfigPath -Encoding UTF8
     } catch { }
@@ -153,6 +172,7 @@ function Get-Sessions {
                     project        = $proj
                     cwd            = [string]$j.cwd
                     title          = ''
+                    group          = ''
                     state          = 'waiting'
                     message        = ''
                     transcriptPath = ''
@@ -189,6 +209,7 @@ function Get-Sessions {
                     $map[$sid].updatedAt = [long]$j.updatedAt
                     if ($j.transcriptPath) { $map[$sid].transcriptPath = [string]$j.transcriptPath }
                     if ($j.title) { $map[$sid].title = [string]$j.title }
+                    if ($j.group) { $map[$sid].group = [string]$j.group }
                     if (-not $map[$sid].project -and $j.project) { $map[$sid].project = [string]$j.project }
                     if (-not $map[$sid].cwd -and $j.cwd) { $map[$sid].cwd = [string]$j.cwd }
                 } else {
@@ -204,6 +225,7 @@ function Get-Sessions {
                         project        = [string]$j.project
                         cwd            = [string]$j.cwd
                         title          = [string]$j.title
+                        group          = [string]$j.group
                         state          = [string]$j.state
                         message        = [string]$j.message
                         transcriptPath = [string]$j.transcriptPath
@@ -273,6 +295,7 @@ function Resolve-Pin($sid, $all) {
         project        = if ($info) { [string]$info.project } else { '' }
         cwd            = if ($info) { [string]$info.cwd }     else { '' }
         title          = if ($info) { [string]$info.title }   else { '' }
+        group          = ''
         transcriptPath = $tpath
         state          = if ($alive) { 'waiting' } else { 'ended' }
         message        = ''
@@ -427,8 +450,10 @@ function Toggle-Pin($sid) {
     if ($script:Pins -contains $sid) {
         $script:Pins = @($script:Pins | Where-Object { $_ -ne $sid })
         if ($script:Groups.ContainsKey($sid)) { $script:Groups.Remove($sid) }
+        $script:AutoPinned[$sid] = $true   # user unpinned: don't auto-re-pin from #name/#group
     } else {
         $script:Pins = @($script:Pins) + $sid
+        if ($script:AutoPinned.ContainsKey($sid)) { $script:AutoPinned.Remove($sid) }
     }
     Normalize-Groups
     Save-Config
@@ -701,6 +726,34 @@ function Refresh-Rows {
     if ($script:dragRowOn) { return }
 
     $all = Get-Sessions
+
+    # Apply in-session "#name"/"#group" commands. A live session that has been
+    # given a label or a group is auto-pinned (once: AutoPinned remembers it, and
+    # a later manual unpin sticks). "#group" is applied as a latch via GroupCmd:
+    # we only (re)assign the group when the requested value changes, so a manual
+    # drag to a different group afterwards is never overridden.
+    $cfgChanged = $false
+    foreach ($k in @($all.Keys)) {
+        $sv = $all[$k]
+        if (-not $sv.live) { continue }
+        if (-not $sv.title -and -not $sv.group) { continue }
+        if (($script:Pins -notcontains $k) -and (-not $script:AutoPinned.ContainsKey($k))) {
+            $script:Pins = @($script:Pins) + $k
+            $script:AutoPinned[$k] = $true
+            $cfgChanged = $true
+        }
+        if (($script:Pins -contains $k) -and $sv.group) {
+            $want = [string]$sv.group
+            if ($script:GroupCmd[$k] -ne $want) {
+                if ($want.Length -gt 40) { $want = $want.Substring(0, 40) }
+                $script:Groups[$k] = $want
+                if ($script:GroupOrder -notcontains $want) { $script:GroupOrder = @($script:GroupOrder) + $want }
+                $script:GroupCmd[$k] = $want
+                $cfgChanged = $true
+            }
+        }
+    }
+    if ($cfgChanged) { Normalize-Groups; Save-Config }
 
     # Never permanently unpin a session just because it vanished from $all. An
     # ended session loses its sessions/<pid>.json and its status file, so it

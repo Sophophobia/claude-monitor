@@ -54,6 +54,8 @@ try {
     # recreated empty on resume, reverting the panel to the auto name. Keeping
     # the label out-of-band lets us re-inject it after any SessionEnd.
     $labelFile = Join-Path $dir ($sid + '.label')
+    # Same idea for the "#group" assignment: durable, survives SessionEnd.
+    $groupFile = Join-Path $dir ($sid + '.group')
 
     # Session ended: remove the status file but KEEP the label so the name
     # survives an idle/backgrounded conversation coming back.
@@ -62,23 +64,29 @@ try {
         exit 0
     }
 
-    # Preserve an existing custom label (set via "#name") and prior state.
+    # Preserve an existing custom label (set via "#name"), group, and prior state.
     $title = ''
+    $group = ''
     $prevState = ''
     $transcriptPath = ''
     if (Test-Path $file) {
         try {
             $prev = Get-Content $file -Raw -ErrorAction Stop | ConvertFrom-Json
             if ($prev.title) { $title = [string]$prev.title }
+            if ($prev.group) { $group = [string]$prev.group }
             if ($prev.state) { $prevState = [string]$prev.state }
             if ($prev.transcriptPath) { $transcriptPath = [string]$prev.transcriptPath }
         } catch { }
     }
 
-    # If the status file carried no title (e.g. it was just recreated after a
-    # SessionEnd), recover the persisted "#name" label from its label file.
+    # If the status file carried no title/group (e.g. it was just recreated after
+    # a SessionEnd), recover the persisted "#name"/"#group" values from their
+    # out-of-band files.
     if (-not $title -and (Test-Path $labelFile)) {
         try { $title = (Get-Content $labelFile -Raw -ErrorAction Stop).Trim() } catch { }
+    }
+    if (-not $group -and (Test-Path $groupFile)) {
+        try { $group = (Get-Content $groupFile -Raw -ErrorAction Stop).Trim() } catch { }
     }
 
     # The hook payload carries the path to this session's conversation transcript
@@ -93,17 +101,36 @@ try {
     $proj = ''
     if ($cwd) { $proj = Split-Path $cwd -Leaf }
 
-    # In-session label command: a prompt like "#name Frontend refactor" on
-    # UserPromptSubmit sets the panel label for THIS session and blocks the
-    # prompt (below) so Claude never processes it.
+    # In-session command(s) on UserPromptSubmit. A prompt may set the panel label
+    # and/or the group, in any order, e.g.:
+    #   #name Frontend refactor
+    #   #group Career
+    #   #name Frontend refactor #group Career
+    # Such a prompt is consumed (blocked below) so Claude never processes it.
+    # The values are persisted out-of-band (.label/.group) so they survive the
+    # SessionEnd the desktop app fires whenever a conversation goes idle.
     $isMarker = $false
-    if ($Event -eq 'running' -and $j.prompt -and ([string]$j.prompt) -match '^\s*#name\s+(.+?)\s*$') {
-        $isMarker = $true
-        $label = (($matches[1]) -replace '\s+', ' ').Trim()
-        if ($label.Length -gt 60) { $label = $label.Substring(0, 60) }
-        $title = $label
-        # Persist the label out-of-band so it survives SessionEnd / restarts.
-        try { Set-Content -Path $labelFile -Value $title -Encoding UTF8 -NoNewline } catch { }
+    $setName  = $false
+    $setGroup = $false
+    if ($Event -eq 'running' -and $j.prompt -and ([string]$j.prompt) -match '^\s*#(name|group)\b') {
+        $p = [string]$j.prompt
+        if ($p -match '(?i)#name\s+(.+?)(?=\s+#group\b|\s*$)') {
+            $v = (($matches[1]) -replace '\s+', ' ').Trim()
+            if ($v) {
+                if ($v.Length -gt 60) { $v = $v.Substring(0, 60) }
+                $title = $v; $setName = $true
+                try { Set-Content -Path $labelFile -Value $title -Encoding UTF8 -NoNewline } catch { }
+            }
+        }
+        if ($p -match '(?i)#group\s+(.+?)(?=\s+#name\b|\s*$)') {
+            $v = (($matches[1]) -replace '\s+', ' ').Trim()
+            if ($v) {
+                if ($v.Length -gt 40) { $v = $v.Substring(0, 40) }
+                $group = $v; $setGroup = $true
+                try { Set-Content -Path $groupFile -Value $group -Encoding UTF8 -NoNewline } catch { }
+            }
+        }
+        $isMarker = ($setName -or $setGroup)
     }
 
     # Map the incoming -Event to a panel state.
@@ -150,6 +177,7 @@ try {
         cwd            = $cwd
         project        = $proj
         title          = $title
+        group          = $group
         state          = $state
         message        = $message
         transcriptPath = $transcriptPath
@@ -166,7 +194,10 @@ try {
     # (JSON decision=block, exit 0) so it never reaches Claude. UTF-8 stdout for
     # non-ASCII labels.
     if ($isMarker) {
-        $resp  = @{ decision = 'block'; reason = ('Claude Monitor: session labelled "{0}"' -f $title) } | ConvertTo-Json -Compress
+        $parts = @()
+        if ($setName)  { $parts += ('labelled "{0}"' -f $title) }
+        if ($setGroup) { $parts += ('grouped under "{0}"' -f $group) }
+        $resp  = @{ decision = 'block'; reason = ('Claude Monitor: session ' + ($parts -join ', ')) } | ConvertTo-Json -Compress
         $bytes = [System.Text.Encoding]::UTF8.GetBytes($resp)
         $out   = [System.Console]::OpenStandardOutput()
         $out.Write($bytes, 0, $bytes.Length)
