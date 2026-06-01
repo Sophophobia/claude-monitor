@@ -14,7 +14,6 @@
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-Add-Type -AssemblyName Microsoft.VisualBasic   # InputBox for the Rename dialog
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 # ---------------------------------------------------------------- paths -----
@@ -498,12 +497,12 @@ function Remove-FromGroup($sid) {
 }
 
 function New-GroupFor($sid) {
-    $new = [Microsoft.VisualBasic.Interaction]::InputBox("Name for the new group:", "New group", "")
+    $new = Show-InputDialog 'New group' 'Name for the new group:' ''
     if (-not [string]::IsNullOrWhiteSpace($new)) { Set-Group $sid $new }
 }
 
 function Rename-Group($old) {
-    $new = [Microsoft.VisualBasic.Interaction]::InputBox("Rename group:", "Rename group", $old)
+    $new = Show-InputDialog 'Rename group' 'New name for this group:' $old
     $new = ([string]$new).Trim()
     if (-not $new -or $new -eq $old) { return }
     if ($new.Length -gt 40) { $new = $new.Substring(0, 40) }
@@ -554,13 +553,78 @@ function Get-OrderedGroups {
     return , $result
 }
 
+# ----------------------------------------------------------- input dialog ---
+# A small dark-themed modal input box that matches the panel, replacing the
+# dated Microsoft.VisualBasic InputBox. Returns the entered string, or $null if
+# the user cancelled (Esc / Cancel / X). An empty string means "submitted blank".
+function Show-InputDialog($title, $prompt, $default) {
+    $dBg    = [System.Drawing.Color]::FromArgb(24,24,28)
+    $dTxt   = [System.Drawing.Color]::FromArgb(229,231,235)
+    $dDim   = [System.Drawing.Color]::FromArgb(148,163,184)
+    $dAcc   = [System.Drawing.Color]::FromArgb(59,130,246)
+    $dField = [System.Drawing.Color]::FromArgb(38,38,44)
+
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.FormBorderStyle = 'None'
+    $dlg.StartPosition   = 'CenterScreen'
+    $dlg.TopMost         = $true
+    $dlg.ShowInTaskbar   = $false
+    $dlg.BackColor       = $dBg
+    $dlg.ClientSize      = New-Object System.Drawing.Size(320, 138)
+    $dlg.KeyPreview      = $true
+    $dlg.Add_Paint({ param($s, $e)
+        $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(60,60,68)), 1
+        $e.Graphics.DrawRectangle($pen, 0, 0, $s.ClientSize.Width - 1, $s.ClientSize.Height - 1)
+        $pen.Dispose() })
+
+    $lt = New-Object System.Windows.Forms.Label
+    $lt.Text = [string]$title; $lt.ForeColor = $dTxt
+    $lt.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
+    $lt.AutoSize = $false; $lt.Location = New-Object System.Drawing.Point(16, 14); $lt.Size = New-Object System.Drawing.Size(288, 22)
+    $dlg.Controls.Add($lt)
+
+    $lp = New-Object System.Windows.Forms.Label
+    $lp.Text = [string]$prompt; $lp.ForeColor = $dDim
+    $lp.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
+    $lp.AutoSize = $false; $lp.Location = New-Object System.Drawing.Point(16, 38); $lp.Size = New-Object System.Drawing.Size(288, 16)
+    $dlg.Controls.Add($lp)
+
+    $box = New-Object System.Windows.Forms.TextBox
+    $box.Text = [string]$default; $box.ForeColor = $dTxt; $box.BackColor = $dField
+    $box.BorderStyle = 'FixedSingle'
+    $box.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+    $box.Location = New-Object System.Drawing.Point(16, 60); $box.Size = New-Object System.Drawing.Size(288, 26)
+    $dlg.Controls.Add($box)
+
+    $ok = New-Object System.Windows.Forms.Button
+    $ok.Text = 'OK'; $ok.ForeColor = [System.Drawing.Color]::White; $ok.BackColor = $dAcc
+    $ok.FlatStyle = 'Flat'; $ok.FlatAppearance.BorderSize = 0
+    $ok.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+    $ok.Size = New-Object System.Drawing.Size(74, 30); $ok.Location = New-Object System.Drawing.Point(230, 98)
+    $dlg.Controls.Add($ok)
+
+    $cancel = New-Object System.Windows.Forms.Button
+    $cancel.Text = 'Cancel'; $cancel.ForeColor = $dTxt; $cancel.BackColor = $dBg
+    $cancel.FlatStyle = 'Flat'; $cancel.FlatAppearance.BorderColor = $dDim; $cancel.FlatAppearance.BorderSize = 1
+    $cancel.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+    $cancel.Size = New-Object System.Drawing.Size(74, 30); $cancel.Location = New-Object System.Drawing.Point(148, 98)
+    $dlg.Controls.Add($cancel)
+
+    $script:dlgResult = $null
+    $ok.Add_Click({ $script:dlgResult = $box.Text; $dlg.Close() })
+    $cancel.Add_Click({ $script:dlgResult = $null; $dlg.Close() })
+    $dlg.AcceptButton = $ok
+    $dlg.CancelButton = $cancel
+    $dlg.Add_Shown({ $box.Focus(); $box.SelectAll() })
+    [void]$dlg.ShowDialog()
+    return $script:dlgResult
+}
+
 # ------------------------------------------------------------- renaming -----
 function Set-Name($sid, $current) {
-    $new = [Microsoft.VisualBasic.Interaction]::InputBox(
-        "Custom name for this session (clear and OK, or Cancel, to keep the auto title):",
-        "Rename session", $current)
-    # InputBox returns '' on Cancel and on an emptied box. Treat empty as "use auto title".
-    if ([string]::IsNullOrWhiteSpace($new)) {
+    $new = Show-InputDialog 'Rename session' 'Enter a name (submit empty to use the auto title):' $current
+    if ($null -eq $new) { return }                 # cancelled: no change
+    if ([string]::IsNullOrWhiteSpace($new)) {      # submitted blank: revert to auto title
         if ($script:Names.ContainsKey($sid)) { $script:Names.Remove($sid) }
     } else {
         $script:Names[$sid] = $new.Trim()
