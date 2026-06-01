@@ -820,14 +820,26 @@ $btnMenu.Add_Click({
     $hdr.Enabled = $false
     [void]$menu.Items.Add($hdr)
 
-    $keys = $all.Keys | Sort-Object { -$all[$_].live }, { $all[$_].project }
-    if ($keys.Count -eq 0) {
+    # List the union of detected sessions ($all) and everything currently pinned,
+    # so every session shown in the panel also appears here (checked) and can be
+    # toggled off. Pins that are idle/backgrounded (gone from $all) are resolved
+    # from the cached identity.
+    $seen = @{}
+    $entries = @()
+    foreach ($sid in (@($all.Keys) + @($script:Pins))) {
+        if ($seen.ContainsKey($sid)) { continue }
+        $seen[$sid] = $true
+        $s = if ($all.ContainsKey($sid)) { $all[$sid] } else { Resolve-Pin $sid $all }
+        $entries += [pscustomobject]@{ sid = $sid; s = $s }
+    }
+    if ($entries.Count -eq 0) {
         $none = New-Object System.Windows.Forms.ToolStripMenuItem('(no sessions detected)')
         $none.Enabled = $false
         [void]$menu.Items.Add($none)
     }
-    foreach ($sid in $keys) {
-        $s = $all[$sid]
+    $entries = @($entries | Sort-Object { -([int][bool]$_.s.live) }, { [string]$_.s.project })
+    foreach ($en in $entries) {
+        $sid = $en.sid; $s = $en.s
         $st = Get-StateStyle $s.state $s.live
         $tag = if ($s.live) { $st.label } else { 'ended' }
         $label = ('{0}  [{1}]' -f (Get-Display $sid $s), $tag)
