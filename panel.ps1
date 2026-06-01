@@ -52,6 +52,8 @@ $script:UngroupedName = 'Ungrouped'   # header shown for sessions in no group (o
 $script:AutoPinned = @{}
 $script:GroupCmd   = @{}
 
+$script:Theme = 'dark'   # 'dark' (default) or 'light'
+
 function Load-Config {
     try {
         if (Test-Path $ConfigPath) {
@@ -98,6 +100,7 @@ function Load-Config {
                 foreach ($p in $c.groupCmd.PSObject.Properties) { $h[$p.Name] = [string]$p.Value }
                 $script:GroupCmd = $h
             }
+            if ($c.theme) { $script:Theme = [string]$c.theme }
         }
     } catch { }
 }
@@ -115,6 +118,7 @@ function Save-Config {
             collapsed  = $script:Collapsed
             autoPinned = $script:AutoPinned
             groupCmd   = $script:GroupCmd
+            theme      = $script:Theme
         }
         ($obj | ConvertTo-Json -Compress) | Set-Content -Path $ConfigPath -Encoding UTF8
     } catch { }
@@ -322,10 +326,38 @@ function Get-StateStyle($state, $live) {
 }
 
 # --------------------------------------------------------------- colors -----
-$cBg     = [System.Drawing.Color]::FromArgb(17,17,19)     # near-black
-$cBar    = [System.Drawing.Color]::FromArgb(28,28,32)
-$cText   = [System.Drawing.Color]::FromArgb(229,231,235)
-$cDim    = [System.Drawing.Color]::FromArgb(148,163,184)
+# Chrome colors are theme-driven (dark / light). State dot colors stay fixed --
+# they read clearly on both backgrounds. Set-ThemeColors fills the $script:c*
+# palette from $script:Theme; Apply-Theme re-applies it live to the panel.
+function Set-ThemeColors {
+    if ($script:Theme -eq 'light') {
+        $script:cBg     = [System.Drawing.Color]::FromArgb(250,250,251)
+        $script:cBar    = [System.Drawing.Color]::FromArgb(234,235,239)
+        $script:cText   = [System.Drawing.Color]::FromArgb(24,24,28)
+        $script:cDim    = [System.Drawing.Color]::FromArgb(100,116,139)
+        $script:cBorder = [System.Drawing.Color]::FromArgb(205,209,218)
+        $script:cField  = [System.Drawing.Color]::FromArgb(255,255,255)
+    } else {
+        $script:cBg     = [System.Drawing.Color]::FromArgb(17,17,19)
+        $script:cBar    = [System.Drawing.Color]::FromArgb(28,28,32)
+        $script:cText   = [System.Drawing.Color]::FromArgb(229,231,235)
+        $script:cDim    = [System.Drawing.Color]::FromArgb(148,163,184)
+        $script:cBorder = [System.Drawing.Color]::FromArgb(55,55,62)
+        $script:cField  = [System.Drawing.Color]::FromArgb(38,38,44)
+    }
+}
+function Apply-Theme {
+    Set-ThemeColors
+    $form.BackColor     = $script:cBg
+    $bar.BackColor      = $script:cBar
+    $title.ForeColor    = $script:cText
+    $btnMenu.ForeColor  = $script:cText
+    $btnClose.ForeColor = $script:cDim
+    $content.BackColor  = $script:cBg
+    $form.Invalidate()
+    Refresh-Rows -force
+}
+$cBg = $cBar = $cText = $cDim = $null   # filled by Set-ThemeColors after Load-Config
 $fName   = New-Object System.Drawing.Font('Segoe UI', 9,  [System.Drawing.FontStyle]::Bold)
 $fState  = New-Object System.Drawing.Font('Segoe UI', 8.5)
 $fIcon   = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
@@ -340,6 +372,7 @@ $script:tip.InitialDelay = 350
 
 # ----------------------------------------------------------------- form -----
 Load-Config
+Set-ThemeColors
 
 $form = New-Object System.Windows.Forms.Form
 $form.FormBorderStyle = 'None'
@@ -360,7 +393,7 @@ if ($null -ne $script:PosX -and $null -ne $script:PosY) {
 # thin border
 $form.Add_Paint({
     param($s,$e)
-    $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(55,55,62)), 1
+    $pen = New-Object System.Drawing.Pen ($script:cBorder), 1
     $e.Graphics.DrawRectangle($pen, 0, 0, $s.Width - 1, $s.Height - 1)
     $pen.Dispose()
 })
@@ -558,11 +591,11 @@ function Get-OrderedGroups {
 # dated Microsoft.VisualBasic InputBox. Returns the entered string, or $null if
 # the user cancelled (Esc / Cancel / X). An empty string means "submitted blank".
 function Show-InputDialog($title, $prompt, $default) {
-    $dBg    = [System.Drawing.Color]::FromArgb(24,24,28)
-    $dTxt   = [System.Drawing.Color]::FromArgb(229,231,235)
-    $dDim   = [System.Drawing.Color]::FromArgb(148,163,184)
+    $dBg    = $script:cBg
+    $dTxt   = $script:cText
+    $dDim   = $script:cDim
     $dAcc   = [System.Drawing.Color]::FromArgb(59,130,246)
-    $dField = [System.Drawing.Color]::FromArgb(38,38,44)
+    $dField = $script:cField
 
     $dlg = New-Object System.Windows.Forms.Form
     $dlg.FormBorderStyle = 'None'
@@ -573,7 +606,7 @@ function Show-InputDialog($title, $prompt, $default) {
     $dlg.ClientSize      = New-Object System.Drawing.Size(320, 138)
     $dlg.KeyPreview      = $true
     $dlg.Add_Paint({ param($s, $e)
-        $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(60,60,68)), 1
+        $pen = New-Object System.Drawing.Pen ($script:cBorder), 1
         $e.Graphics.DrawRectangle($pen, 0, 0, $s.ClientSize.Width - 1, $s.ClientSize.Height - 1)
         $pen.Dispose() })
 
@@ -771,6 +804,14 @@ $btnMenu.Add_Click({
         Refresh-Rows -force
     })
     [void]$menu.Items.Add($clean)
+    $themeItem = New-Object System.Windows.Forms.ToolStripMenuItem(
+        $(if ($script:Theme -eq 'light') { 'Switch to dark theme' } else { 'Switch to light theme' }))
+    $themeItem.Add_Click({
+        $script:Theme = if ($script:Theme -eq 'light') { 'dark' } else { 'light' }
+        Save-Config
+        Apply-Theme
+    })
+    [void]$menu.Items.Add($themeItem)
     $quit = New-Object System.Windows.Forms.ToolStripMenuItem('Close panel')
     $quit.Add_Click({ $form.Close() })
     [void]$menu.Items.Add($quit)
