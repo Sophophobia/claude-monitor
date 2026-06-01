@@ -86,9 +86,10 @@ To give a session a meaningful name, use either method:
   right-clicking a header lets you **rename** or **move the whole group** up/down.
   Sessions in no group are shown under an **Ungrouped** header. A group vanishes
   automatically once its last member leaves.
-- **Reorder:** drag a row up or down (or right-click → Move up / Move down). Once
-  you have groups, reordering is via right-click Move up/down (it stays within
-  the group).
+- **Reorder:** drag a row up or down, or right-click → Move up / Move down. When
+  you have groups, dragging a row into another group's band also **moves it into
+  that group** (drop it on the **Ungrouped** band to take it out); Move up/down
+  stays within the group.
 - **Move:** drag the title bar. Position is remembered.
 - **Close:** click ✕ (the panel only; hooks keep running and cost ~nothing).
 - **Autostart:** `install.ps1 -Startup`, or drop a shortcut to `start-panel.vbs`
@@ -208,8 +209,9 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
   右键 → **Remove from group** 移出分组。分组标题**可折叠**（点一下收起/展开，状态会被
   记住），右键标题可以**重命名**或把**整组上下移动**。不在任何分组里的会话归在
   **Ungrouped** 标题下。某个分组的最后一个成员离开后，这个分组会自动消失。
-- **调整顺序：** 拖动某一行上下移动（或右键 → Move up / Move down）。建了分组之后，
-  改顺序用右键 Move up/down（只在本组内移动）。
+- **调整顺序：** 拖动某一行上下移动，或右键 → Move up / Move down。建了分组之后，把某行
+  **拖到另一个分组的区域**就会**把它加入那个组**（拖到 **Ungrouped** 区域则移出分组）；
+  右键 Move up/down 只在本组内移动。
 - **移动：** 拖标题栏，位置会被记住。
 - **关闭：** 点 ✕（只关面板；hooks 继续跑，几乎不耗资源）。
 - **开机自启：** `install.ps1 -Startup`，或把 `start-panel.vbs` 的快捷方式放进 `shell:startup` 文件夹。删掉那个快捷方式即可取消。

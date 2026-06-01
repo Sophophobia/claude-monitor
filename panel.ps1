@@ -569,23 +569,75 @@ function Move-Pin($sid, $delta) {
     Refresh-Rows -force
 }
 
-# Commit a drag-reorder: move the dragged session to the slot under where it was dropped.
+# Commit a drag-reorder. Flat view: move the dragged session to the slot under
+# where it was dropped. Grouped view: also move it into whichever group's band it
+# was dropped on (or out of any group if dropped on the Ungrouped band).
 function Commit-Drag {
-    $list = @($script:Pins)
-    $from = [array]::IndexOf($list, [string]$script:dragSid)
-    if ($from -lt 0) { Refresh-Rows -force; return }
-    $target = [int][Math]::Round(($script:dragRow.Top - 4) / $RowH)
-    if ($target -lt 0) { $target = 0 }
-    if ($target -gt ($list.Count - 1)) { $target = $list.Count - 1 }
-    if ($target -ne $from) {
-        $al = New-Object System.Collections.ArrayList
-        [void]$al.AddRange($list)
-        $item = $al[$from]
-        $al.RemoveAt($from)
-        $al.Insert($target, $item)
-        $script:Pins = @($al.ToArray())
-        Save-Config
+    $sid = [string]$script:dragSid
+    $dropMid = $script:dragRow.Top + [int]($RowH / 2)
+
+    if (-not $script:LayoutGrouped) {
+        $list = @($script:Pins)
+        $from = [array]::IndexOf($list, $sid)
+        if ($from -lt 0) { Refresh-Rows -force; return }
+        $target = [int][Math]::Round(($script:dragRow.Top - 4) / $RowH)
+        if ($target -lt 0) { $target = 0 }
+        if ($target -gt ($list.Count - 1)) { $target = $list.Count - 1 }
+        if ($target -ne $from) {
+            $al = New-Object System.Collections.ArrayList
+            [void]$al.AddRange($list)
+            $item = $al[$from]; $al.RemoveAt($from); $al.Insert($target, $item)
+            $script:Pins = @($al.ToArray())
+            Save-Config
+        }
+        Refresh-Rows -force
+        return
     }
+
+    # ---- grouped: find the target group band the drop landed in ----
+    $tg = $script:LayoutGroups[0]
+    foreach ($g in $script:LayoutGroups) { if ($g.top -le $dropMid) { $tg = $g } }
+    if (-not $tg) { Refresh-Rows -force; return }
+    $targetKey = [string]$tg.name
+    $targetIsUng = [bool]$tg.isUngrouped
+
+    # Existing members of that group (in pins order), excluding the dragged one.
+    if ($targetIsUng) {
+        $existing = @($script:Pins | Where-Object { -not (Get-GroupOf $_) -and $_ -ne $sid })
+    } else {
+        $existing = @($script:Pins | Where-Object { (Get-GroupOf $_) -eq $targetKey -and $_ -ne $sid })
+    }
+
+    # Insertion index = how many of the target group's rendered rows sit above the drop.
+    $grows = @($script:LayoutRows | Where-Object { $_.group -eq $targetKey -and $_.sid -ne $sid } | Sort-Object top)
+    $idx = 0
+    foreach ($r in $grows) { if (($r.top + [int]($RowH / 2)) -lt $dropMid) { $idx++ } }
+    if ($idx -gt $existing.Count) { $idx = $existing.Count }
+
+    # New ordering of the target group's members with the dragged sid inserted.
+    $al = New-Object System.Collections.ArrayList
+    foreach ($m in $existing) { [void]$al.Add($m) }
+    [void]$al.Insert($idx, $sid)
+    $newMembers = @($al.ToArray())
+
+    # Update membership, then rebuild pins as the flattened group order.
+    if ($targetIsUng) {
+        if ($script:Groups.ContainsKey($sid)) { $script:Groups.Remove($sid) }
+    } else {
+        $script:Groups[$sid] = $targetKey
+    }
+
+    $result = @()
+    foreach ($g in @($script:GroupOrder)) {
+        if ($g -eq $targetKey) { $result += $newMembers }
+        else { $result += @($script:Pins | Where-Object { (Get-GroupOf $_) -eq $g -and $_ -ne $sid }) }
+    }
+    if ($targetIsUng) { $result += $newMembers }
+    else { $result += @($script:Pins | Where-Object { -not (Get-GroupOf $_) -and $_ -ne $sid }) }
+    $script:Pins = @($result)
+
+    Normalize-Groups
+    Save-Config
     Refresh-Rows -force
 }
 
@@ -687,6 +739,13 @@ function Refresh-Rows {
         return
     }
 
+    # Layout maps captured for group-aware drag-and-drop: where each member row
+    # and each group header sits vertically, so a drop can be mapped to a target
+    # group + insertion index.
+    $script:LayoutRows    = @()
+    $script:LayoutGroups  = @()
+    $script:LayoutGrouped = $grouped
+
     $y = 4
     foreach ($blk in $ordered) {
         $collapsed = ($script:Collapsed.ContainsKey($blk.name) -and $script:Collapsed[$blk.name])
@@ -701,6 +760,7 @@ function Refresh-Rows {
             $hp.Location  = New-Object System.Drawing.Point(0, $y)
             $hp.Size      = New-Object System.Drawing.Size($W, $HeaderH)
             $hp.BackColor = $cBar
+            $script:LayoutGroups += , ([pscustomobject]@{ name = $grpName; top = $y; isUngrouped = $blk.isUngrouped })
 
             $hl = New-Object System.Windows.Forms.Label
             $hl.Text      = ('{0}  {1}  ({2})' -f $chev, $grpName, $blk.members.Count)
@@ -752,6 +812,7 @@ function Refresh-Rows {
             $row.Location  = New-Object System.Drawing.Point(0, $y)
             $row.Size      = New-Object System.Drawing.Size($W, $RowH)
             $row.BackColor = $cBg
+            $script:LayoutRows += , ([pscustomobject]@{ sid = $sid; group = $blk.name; top = $y })
 
             $dot = New-Object System.Windows.Forms.Label
             $dot.Text      = [char]0x25CF   # filled circle
@@ -841,36 +902,34 @@ function Refresh-Rows {
             $dot.ContextMenuStrip  = $rowMenu
             $stt.ContextMenuStrip  = $rowMenu
 
-            # Left-drag to reorder is only enabled in the flat (ungrouped) view;
-            # when groups exist, reordering is via right-click Move up/down so a
-            # drag can't silently break group clustering.
-            if (-not $grouped) {
-                $row.Cursor = 'SizeAll'; $dot.Cursor = 'SizeAll'; $name.Cursor = 'SizeAll'; $stt.Cursor = 'SizeAll'
-                $onDown = {
-                    param($snd, $e)
-                    if ($e.Button -ne [System.Windows.Forms.MouseButtons]::Left) { return }
-                    $script:dragSid     = $sid
-                    $script:dragRow     = $row
-                    $script:dragOrigTop = $row.Top
-                    $script:dragStartY  = [System.Windows.Forms.Cursor]::Position.Y
-                    $script:dragRowOn   = $true
-                    $row.BringToFront()
-                }.GetNewClosure()
-                $onMove = {
-                    param($snd, $e)
-                    if (-not $script:dragRowOn) { return }
-                    $dy = [System.Windows.Forms.Cursor]::Position.Y - $script:dragStartY
-                    $script:dragRow.Top = $script:dragOrigTop + $dy
-                }
-                $onUp = {
-                    param($snd, $e)
-                    if (-not $script:dragRowOn) { return }
-                    $script:dragRowOn = $false
-                    if ($script:dragRow.Top -ne $script:dragOrigTop) { Commit-Drag }
-                }
-                foreach ($c in @($row, $dot, $name, $stt)) {
-                    $c.Add_MouseDown($onDown); $c.Add_MouseMove($onMove); $c.Add_MouseUp($onUp)
-                }
+            # Left-drag to reorder. In the flat view it just reorders; once groups
+            # exist, dropping a row into another group's band also moves it into
+            # that group (and dropping into the Ungrouped band removes it).
+            $row.Cursor = 'SizeAll'; $dot.Cursor = 'SizeAll'; $name.Cursor = 'SizeAll'; $stt.Cursor = 'SizeAll'
+            $onDown = {
+                param($snd, $e)
+                if ($e.Button -ne [System.Windows.Forms.MouseButtons]::Left) { return }
+                $script:dragSid     = $sid
+                $script:dragRow     = $row
+                $script:dragOrigTop = $row.Top
+                $script:dragStartY  = [System.Windows.Forms.Cursor]::Position.Y
+                $script:dragRowOn   = $true
+                $row.BringToFront()
+            }.GetNewClosure()
+            $onMove = {
+                param($snd, $e)
+                if (-not $script:dragRowOn) { return }
+                $dy = [System.Windows.Forms.Cursor]::Position.Y - $script:dragStartY
+                $script:dragRow.Top = $script:dragOrigTop + $dy
+            }
+            $onUp = {
+                param($snd, $e)
+                if (-not $script:dragRowOn) { return }
+                $script:dragRowOn = $false
+                if ($script:dragRow.Top -ne $script:dragOrigTop) { Commit-Drag }
+            }
+            foreach ($c in @($row, $dot, $name, $stt)) {
+                $c.Add_MouseDown($onDown); $c.Add_MouseMove($onMove); $c.Add_MouseUp($onUp)
             }
 
             $content.Controls.Add($row)
