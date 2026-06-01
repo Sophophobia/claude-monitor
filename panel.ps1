@@ -842,9 +842,13 @@ $btnMenu.Add_Click({
         $sid = $en.sid; $s = $en.s
         $st = Get-StateStyle $s.state $s.live
         $tag = if ($s.live) { $st.label } else { 'ended' }
-        $label = ('{0}  [{1}]' -f (Get-Display $sid $s), $tag)
+        # Show the pinned state as a leading check glyph in the text. The native
+        # ToolStripMenuItem.Checked mark lives in the image/check margin, which we
+        # hide (ShowImageMargin = false) to kill the white gutter, so we draw our
+        # own. Unpinned items get a same-width blank to keep the labels aligned.
+        $mark = if ($script:Pins -contains $sid) { [char]0x2713 } else { ' ' }
+        $label = ('{0}  {1}  [{2}]' -f $mark, (Get-Display $sid $s), $tag)
         $item = New-Object System.Windows.Forms.ToolStripMenuItem($label)
-        $item.Checked = ($script:Pins -contains $sid)
         $item.Tag = $sid
         $item.Add_Click({ Toggle-Pin $this.Tag }.GetNewClosure())
         [void]$menu.Items.Add($item)
