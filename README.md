@@ -98,6 +98,7 @@ and it stays unpinned; a later manual drag to another group is never overridden.
   that group** (drop it on the **Ungrouped** band to take it out); Move up/down
   stays within the group.
 - **Move:** drag the title bar. Position is remembered.
+- **Theme:** click the menu (≡) → **Switch to light/dark theme**. Dark by default; the choice is remembered.
 - **Close:** click ✕ (the panel only; hooks keep running and cost ~nothing).
 - **Autostart:** `install.ps1 -Startup`, or drop a shortcut to `start-panel.vbs`
   into the `shell:startup` folder. Remove that shortcut to disable.
@@ -223,6 +224,7 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
   **拖到另一个分组的区域**就会**把它加入那个组**（拖到 **Ungrouped** 区域则移出分组）；
   右键 Move up/down 只在本组内移动。
 - **移动：** 拖标题栏，位置会被记住。
+- **主题：** 点 ≡ 菜单 → **Switch to light/dark theme** 切换亮/暗主题。默认暗色，选择会被记住。
 - **关闭：** 点 ✕（只关面板；hooks 继续跑，几乎不耗资源）。
 - **开机自启：** `install.ps1 -Startup`，或把 `start-panel.vbs` 的快捷方式放进 `shell:startup` 文件夹。删掉那个快捷方式即可取消。
 
