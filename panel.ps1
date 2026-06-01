@@ -1013,7 +1013,7 @@ function Refresh-Rows {
             $lbl.Text = $txt; $lbl.ForeColor = $txtColor; $lbl.Font = $fState
             $lbl.AutoSize = $false; $lbl.AutoEllipsis = $true
             $lbl.Location = New-Object System.Drawing.Point($tx, 0)
-            $lbl.Size = New-Object System.Drawing.Size(($W - $tx - 10), $RowH); $lbl.TextAlign = 'MiddleLeft'
+            $lbl.Size = New-Object System.Drawing.Size(($W - $tx - 10), $RowH); $lbl.TextAlign = 'MiddleRight'
             $lbl.Cursor = 'Hand'; $lbl.Add_Click($expand)
             $row.Controls.Add($lbl)
 
