@@ -34,7 +34,10 @@ Each pinned session is one row: a colored dot + a label + its current state.
 ## Install
 
 1. Copy this whole folder to the machine (anywhere).
-2. Run setup once (PowerShell):
+2. Open the folder in a terminal first (in Explorer, right-click the folder →
+   **Open in Terminal**, or type `powershell` in the address bar). The `.\` below
+   means "this folder", so PowerShell must already be in it.
+3. Run setup once:
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File ".\install.ps1"
    ```
@@ -42,8 +45,10 @@ Each pinned session is one row: a colored dot + a label + its current state.
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File ".\install.ps1" -Startup
    ```
-3. **Restart any open Claude Code sessions** so the hooks take effect.
-4. Double-click `start-panel.vbs` to show the panel.
+   (Or skip step 2 and pass the full path instead of `.\install.ps1` — it works
+   from any directory, since the script locates its own folder.)
+4. **Restart any open Claude Code sessions** so the hooks take effect.
+5. Double-click `start-panel.vbs` to show the panel.
 
 `install.ps1` figures out its own folder, so the hook paths are always correct
 for that machine regardless of username or install location. It backs up any
@@ -178,7 +183,8 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
 ## 安装
 
 1. 把整个文件夹拷到目标机器（任意位置）。
-2. 运行一次安装（PowerShell）：
+2. **先在该文件夹里打开终端**（资源管理器里右键文件夹 →「在终端中打开」，或在地址栏敲 `powershell` 回车）。下面的 `.\` 表示"当前这个文件夹"，所以 PowerShell 的当前目录必须就是它。
+3. 运行一次安装：
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File ".\install.ps1"
    ```
@@ -186,8 +192,9 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File ".\install.ps1" -Startup
    ```
-3. **重启所有已打开的 Claude Code 会话**，让 hooks 生效。
-4. 双击 `start-panel.vbs` 显示面板。
+   （或者跳过第 2 步，把 `.\install.ps1` 换成完整路径 —— 在哪个目录运行都行，脚本会自己定位所在文件夹。）
+4. **重启所有已打开的 Claude Code 会话**，让 hooks 生效。
+5. 双击 `start-panel.vbs` 显示面板。
 
 `install.ps1` 会自动定位自己所在文件夹，所以 hook 路径在任何机器上都正确，不受用户名或安装位置影响。它会先把已有的 `settings.json` 备份成 `settings.json.bak`，并保留其他 hooks。
 
