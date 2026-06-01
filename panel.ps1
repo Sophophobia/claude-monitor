@@ -79,6 +79,7 @@ $script:AutoPinned = @{}
 $script:GroupCmd   = @{}
 
 $script:Theme = 'dark'   # 'dark' (default) or 'light'
+$script:Compact = $false # compact mode: show only sessions needing answer/permission
 
 function Load-Config {
     try {
@@ -127,6 +128,7 @@ function Load-Config {
                 $script:GroupCmd = $h
             }
             if ($c.theme) { $script:Theme = [string]$c.theme }
+            if ($null -ne $c.compact) { $script:Compact = [bool]$c.compact }
         }
     } catch { }
 }
@@ -145,6 +147,7 @@ function Save-Config {
             autoPinned = $script:AutoPinned
             groupCmd   = $script:GroupCmd
             theme      = $script:Theme
+            compact    = $script:Compact
         }
         ($obj | ConvertTo-Json -Compress) | Set-Content -Path $ConfigPath -Encoding UTF8
     } catch { }
@@ -395,13 +398,21 @@ function Style-Menu($m) {
 }
 function Apply-Theme {
     Set-ThemeColors
-    $form.BackColor     = $script:cBg
-    $bar.BackColor      = $script:cBar
-    $title.ForeColor    = $script:cText
-    $btnMenu.ForeColor  = $script:cText
-    $btnClose.ForeColor = $script:cDim
-    $content.BackColor  = $script:cBg
+    $form.BackColor      = $script:cBg
+    $bar.BackColor       = $script:cBar
+    $title.ForeColor     = $script:cText
+    $btnCompact.ForeColor = $script:cText
+    $btnMenu.ForeColor   = $script:cText
+    $btnClose.ForeColor  = $script:cDim
+    $content.BackColor   = $script:cBg
     $form.Invalidate()
+    Refresh-Rows -force
+}
+# Toggle compact mode (show only sessions needing answer/permission).
+function Set-Compact($on) {
+    $script:Compact = [bool]$on
+    if ($btnCompact) { $btnCompact.Text = if ($script:Compact) { [char]0x25BE } else { [char]0x25B4 } }
+    Save-Config
     Refresh-Rows -force
 }
 $cBg = $cBar = $cText = $cDim = $null   # filled by Set-ThemeColors after Load-Config
@@ -458,9 +469,22 @@ $title.ForeColor = $cText
 $title.Font      = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
 $title.AutoSize  = $false
 $title.Location  = New-Object System.Drawing.Point(10, 0)
-$title.Size      = New-Object System.Drawing.Size(($W - 80), $TitleH)
+$title.Size      = New-Object System.Drawing.Size(($W - 96), $TitleH)
 $title.TextAlign = 'MiddleLeft'
 $bar.Controls.Add($title)
+
+# Compact-mode toggle (shows only sessions that need you).
+$btnCompact = New-Object System.Windows.Forms.Label
+$btnCompact.Text      = if ($script:Compact) { [char]0x25BE } else { [char]0x25B4 }
+$btnCompact.ForeColor = $cText
+$btnCompact.Font      = $fIcon
+$btnCompact.Size      = New-Object System.Drawing.Size(26, $TitleH)
+$btnCompact.Location  = New-Object System.Drawing.Point(($W - 82), 0)
+$btnCompact.TextAlign = 'MiddleCenter'
+$btnCompact.Cursor    = 'Hand'
+$bar.Controls.Add($btnCompact)
+$btnCompact.Add_Click({ Set-Compact (-not $script:Compact) })
+$script:tip.SetToolTip($btnCompact, 'Compact mode: show only sessions that need you')
 
 $btnMenu = New-Object System.Windows.Forms.Label
 $btnMenu.Text      = [char]0x2261   # triple bar
@@ -921,6 +945,80 @@ function Refresh-Rows {
         }
     }
     if ($cfgChanged) { Normalize-Groups; Save-Config }
+
+    # Compact mode: show only sessions that need you (Needs permission / answer),
+    # permission first; if several, the top one plus the total count; if none, a
+    # one-line "all idle" summary. Always title bar + one row tall.
+    if ($script:Compact) {
+        $att = @()
+        $i = 0
+        foreach ($sid in @($script:Pins)) {
+            $s = Resolve-Pin $sid $all
+            if ($s.state -eq 'permission' -or $s.state -eq 'ask') {
+                $att += [pscustomobject]@{ sid = $sid; s = $s; pri = $(if ($s.state -eq 'permission') { 0 } else { 1 }); ord = $i }
+            }
+            $i++
+        }
+        $att = @($att | Sort-Object pri, ord)
+        $liveCount = @($script:Pins | Where-Object { (Resolve-Pin $_ $all).live }).Count
+
+        if ($att.Count -gt 0) { $csig = 'C1|{0}|{1}|{2}' -f $att[0].sid, $att[0].s.state, $att.Count }
+        else                  { $csig = 'C0|{0}' -f $liveCount }
+        if ($script:pinInfoDirty) { Save-Config; $script:pinInfoDirty = $false }
+        if (-not $force -and $csig -eq $script:lastSig) { return }
+        $script:lastSig = $csig
+
+        $content.SuspendLayout()
+        $content.Controls.Clear()
+
+        if ($att.Count -eq 0) {
+            $hint = New-Object System.Windows.Forms.Label
+            $hint.Text      = if ($liveCount -gt 0) { "Nothing needs you  ($liveCount live)" } else { 'No live sessions' }
+            $hint.ForeColor = $cDim
+            $hint.Font      = $fState
+            $hint.AutoSize  = $false
+            $hint.Dock      = 'Fill'
+            $hint.TextAlign = 'MiddleCenter'
+            $content.Controls.Add($hint)
+        } else {
+            $top = $att[0]; $s = $top.s
+            $st  = Get-StateStyle $s.state $s.live
+            $row = New-Object System.Windows.Forms.Panel
+            $row.Location  = New-Object System.Drawing.Point(0, 4)
+            $row.Size      = New-Object System.Drawing.Size($W, $RowH)
+            $row.BackColor = $cBg
+            $row.Cursor    = 'Hand'
+
+            $dot = New-Object System.Windows.Forms.Label
+            $dot.Text = [char]0x25CF; $dot.ForeColor = $st.color; $dot.Font = $fIcon
+            $dot.AutoSize = $false; $dot.Location = New-Object System.Drawing.Point(10, 0)
+            $dot.Size = New-Object System.Drawing.Size(18, $RowH); $dot.TextAlign = 'MiddleCenter'
+            $row.Controls.Add($dot)
+
+            $name = New-Object System.Windows.Forms.Label
+            $name.Text = Get-Display $top.sid $s; $name.ForeColor = $cText; $name.Font = $fName
+            $name.AutoSize = $false; $name.AutoEllipsis = $true
+            $name.Location = New-Object System.Drawing.Point(32, 0)
+            $name.Size = New-Object System.Drawing.Size(112, $RowH); $name.TextAlign = 'MiddleLeft'
+            $row.Controls.Add($name)
+
+            $rt  = if ($att.Count -gt 1) { '{0} · {1}' -f $st.label, $att.Count } else { $st.label }
+            $stt = New-Object System.Windows.Forms.Label
+            $stt.Text = $rt; $stt.ForeColor = $st.color; $stt.Font = $fState
+            $stt.AutoSize = $false; $stt.Location = New-Object System.Drawing.Point(146, 0)
+            $stt.Size = New-Object System.Drawing.Size(($W - 152), $RowH); $stt.TextAlign = 'MiddleRight'
+            $row.Controls.Add($stt)
+
+            # Click anywhere on the summary row expands back to the full panel.
+            $expand = { Set-Compact $false }
+            $row.Add_Click($expand); $dot.Add_Click($expand); $name.Add_Click($expand); $stt.Add_Click($expand)
+            $script:tip.SetToolTip($name, 'Click to expand')
+            $content.Controls.Add($row)
+        }
+        $form.Height = $TitleH + $RowH + 8
+        $content.ResumeLayout()
+        return
+    }
 
     # Never permanently unpin a session just because it vanished from $all. An
     # ended session loses its sessions/<pid>.json and its status file, so it
