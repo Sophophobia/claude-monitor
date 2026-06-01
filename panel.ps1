@@ -946,73 +946,76 @@ function Refresh-Rows {
     }
     if ($cfgChanged) { Normalize-Groups; Save-Config }
 
-    # Compact mode: show only sessions that need you (Needs permission / answer),
-    # permission first; if several, the top one plus the total count; if none, a
-    # one-line "all idle" summary. Always title bar + one row tall.
+    # Compact mode: one line. A small status dot per pinned session (so you can
+    # see they're all still here, colored by state) plus text: the top session
+    # that needs you (permission first), else just the session count. Click
+    # anywhere to expand; hover a dot to name it.
     if ($script:Compact) {
-        $att = @()
+        $items = @()
         $i = 0
         foreach ($sid in @($script:Pins)) {
-            $s = Resolve-Pin $sid $all
-            if ($s.state -eq 'permission' -or $s.state -eq 'ask') {
-                $att += [pscustomobject]@{ sid = $sid; s = $s; pri = $(if ($s.state -eq 'permission') { 0 } else { 1 }); ord = $i }
-            }
+            $s  = Resolve-Pin $sid $all
+            $st = Get-StateStyle $s.state $s.live
+            $att = if ($s.state -eq 'permission') { 1 } elseif ($s.state -eq 'ask') { 2 } else { 0 }
+            $items += [pscustomobject]@{ sid = $sid; s = $s; st = $st; ord = $i; att = $att }
             $i++
         }
-        $att = @($att | Sort-Object pri, ord)
-        $liveCount = @($script:Pins | Where-Object { (Resolve-Pin $_ $all).live }).Count
+        $attn  = @($items | Where-Object { $_.att -gt 0 } | Sort-Object att, ord)
+        $total = $items.Count
 
-        if ($att.Count -gt 0) { $csig = 'C1|{0}|{1}|{2}' -f $att[0].sid, $att[0].s.state, $att.Count }
-        else                  { $csig = 'C0|{0}' -f $liveCount }
+        $stateSig = ($items | ForEach-Object { '{0}:{1}:{2}' -f $_.sid, $_.s.state, $_.s.live }) -join ','
+        $csig = 'CD|{0}|{1}' -f $stateSig, $(if ($attn.Count) { '{0}:{1}' -f $attn[0].sid, $attn.Count } else { '0' })
         if ($script:pinInfoDirty) { Save-Config; $script:pinInfoDirty = $false }
         if (-not $force -and $csig -eq $script:lastSig) { return }
         $script:lastSig = $csig
 
         $content.SuspendLayout()
         $content.Controls.Clear()
+        $expand = { Set-Compact $false }
 
-        if ($att.Count -eq 0) {
+        if ($total -eq 0) {
             $hint = New-Object System.Windows.Forms.Label
-            $hint.Text      = if ($liveCount -gt 0) { "Nothing needs you  ($liveCount live)" } else { 'No live sessions' }
-            $hint.ForeColor = $cDim
-            $hint.Font      = $fState
-            $hint.AutoSize  = $false
-            $hint.Dock      = 'Fill'
-            $hint.TextAlign = 'MiddleCenter'
+            $hint.Text = 'No sessions pinned.  Click  ' + [char]0x2261 + '  to pick.'
+            $hint.ForeColor = $cDim; $hint.Font = $fState; $hint.AutoSize = $false
+            $hint.Dock = 'Fill'; $hint.TextAlign = 'MiddleCenter'
             $content.Controls.Add($hint)
         } else {
-            $top = $att[0]; $s = $top.s
-            $st  = Get-StateStyle $s.state $s.live
             $row = New-Object System.Windows.Forms.Panel
-            $row.Location  = New-Object System.Drawing.Point(0, 4)
-            $row.Size      = New-Object System.Drawing.Size($W, $RowH)
-            $row.BackColor = $cBg
-            $row.Cursor    = 'Hand'
+            $row.Location = New-Object System.Drawing.Point(0, 4)
+            $row.Size = New-Object System.Drawing.Size($W, $RowH)
+            $row.BackColor = $cBg; $row.Cursor = 'Hand'
+            $row.Add_Click($expand)
 
-            $dot = New-Object System.Windows.Forms.Label
-            $dot.Text = [char]0x25CF; $dot.ForeColor = $st.color; $dot.Font = $fIcon
-            $dot.AutoSize = $false; $dot.Location = New-Object System.Drawing.Point(10, 0)
-            $dot.Size = New-Object System.Drawing.Size(18, $RowH); $dot.TextAlign = 'MiddleCenter'
-            $row.Controls.Add($dot)
+            $x = 10
+            foreach ($it in $items) {
+                $d = New-Object System.Windows.Forms.Label
+                $d.Text = [char]0x25CF; $d.ForeColor = $it.st.color; $d.Font = $fIcon
+                $d.AutoSize = $false; $d.Location = New-Object System.Drawing.Point($x, 0)
+                $d.Size = New-Object System.Drawing.Size(14, $RowH); $d.TextAlign = 'MiddleCenter'
+                $d.Cursor = 'Hand'; $d.Add_Click($expand)
+                $script:tip.SetToolTip($d, ('{0} - {1}' -f (Get-Display $it.sid $it.s), $it.st.label))
+                $row.Controls.Add($d)
+                $x += 14
+            }
 
-            $name = New-Object System.Windows.Forms.Label
-            $name.Text = Get-Display $top.sid $s; $name.ForeColor = $cText; $name.Font = $fName
-            $name.AutoSize = $false; $name.AutoEllipsis = $true
-            $name.Location = New-Object System.Drawing.Point(32, 0)
-            $name.Size = New-Object System.Drawing.Size(112, $RowH); $name.TextAlign = 'MiddleLeft'
-            $row.Controls.Add($name)
+            if ($attn.Count) {
+                $top = $attn[0]
+                $txt = if ($attn.Count -gt 1) { '{0} · {1} · {2}' -f (Get-Display $top.sid $top.s), $top.st.label, $attn.Count }
+                       else { '{0} · {1}' -f (Get-Display $top.sid $top.s), $top.st.label }
+                $txtColor = $top.st.color
+            } else {
+                $txt = '{0} session{1}' -f $total, $(if ($total -eq 1) { '' } else { 's' })
+                $txtColor = $cDim
+            }
+            $tx = [Math]::Min($x + 8, $W - 60)
+            $lbl = New-Object System.Windows.Forms.Label
+            $lbl.Text = $txt; $lbl.ForeColor = $txtColor; $lbl.Font = $fState
+            $lbl.AutoSize = $false; $lbl.AutoEllipsis = $true
+            $lbl.Location = New-Object System.Drawing.Point($tx, 0)
+            $lbl.Size = New-Object System.Drawing.Size(($W - $tx - 10), $RowH); $lbl.TextAlign = 'MiddleLeft'
+            $lbl.Cursor = 'Hand'; $lbl.Add_Click($expand)
+            $row.Controls.Add($lbl)
 
-            $rt  = if ($att.Count -gt 1) { '{0} · {1}' -f $st.label, $att.Count } else { $st.label }
-            $stt = New-Object System.Windows.Forms.Label
-            $stt.Text = $rt; $stt.ForeColor = $st.color; $stt.Font = $fState
-            $stt.AutoSize = $false; $stt.Location = New-Object System.Drawing.Point(146, 0)
-            $stt.Size = New-Object System.Drawing.Size(($W - 152), $RowH); $stt.TextAlign = 'MiddleRight'
-            $row.Controls.Add($stt)
-
-            # Click anywhere on the summary row expands back to the full panel.
-            $expand = { Set-Compact $false }
-            $row.Add_Click($expand); $dot.Add_Click($expand); $name.Add_Click($expand); $stt.Add_Click($expand)
-            $script:tip.SetToolTip($name, 'Click to expand')
             $content.Controls.Add($row)
         }
         $form.Height = $TitleH + $RowH + 8

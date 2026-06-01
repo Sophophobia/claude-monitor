@@ -104,7 +104,7 @@ and it stays unpinned; a later manual drag to another group is never overridden.
   stays within the group.
 - **Move:** drag the title bar. Position is remembered.
 - **Theme:** click the menu (≡) → **Switch to light/dark theme**. Dark by default; the choice is remembered.
-- **Compact mode:** click ▴ in the title bar to collapse the panel to a single line that shows only sessions needing your **answer** or **permission** (the top one, permission first, plus a total count). Click that line or ▾ to expand. When nothing needs you it just reads "Nothing needs you".
+- **Compact mode:** click ▴ in the title bar to collapse the panel to a single line: one status dot per session (colored by state, hover to name it) plus the top session needing your **answer**/**permission** (permission first) and a count, or just the session count when all is calm. Click anywhere or ▾ to expand.
 - **Close:** click ✕ (the panel only; hooks keep running and cost ~nothing).
 - **Autostart:** `install.ps1 -Startup`, or drop a shortcut to `start-panel.vbs`
   into the `shell:startup` folder. Remove that shortcut to disable.
@@ -233,7 +233,7 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
   右键 Move up/down 只在本组内移动。
 - **移动：** 拖标题栏，位置会被记住。
 - **主题：** 点 ≡ 菜单 → **Switch to light/dark theme** 切换亮/暗主题。默认暗色，选择会被记住。
-- **超折叠模式：** 点标题栏的 ▴ 把面板收成一行，只显示需要你**回答**或**给权限**的会话（最上面一条，permission 优先，外加总条数）。点那一行或 ▾ 展开。没有需要处理的会话时显示一行 “Nothing needs you”。
+- **超折叠模式：** 点标题栏的 ▴ 收成一行：每个会话一个状态点（按状态上色，hover 看名字），外加最需要处理的那条（**回答**/**权限**，permission 优先）+ 总数；都没事时显示会话总数。点任意处或 ▾ 展开。
 - **关闭：** 点 ✕（只关面板；hooks 继续跑，几乎不耗资源）。
 - **开机自启：** `install.ps1 -Startup`，或把 `start-panel.vbs` 的快捷方式放进 `shell:startup` 文件夹。删掉那个快捷方式即可取消。
 
