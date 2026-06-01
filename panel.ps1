@@ -381,10 +381,17 @@ function Style-Menu($m) {
     [CMColorTable]::Bg     = $script:cBar
     [CMColorTable]::Hover  = $script:cHover
     [CMColorTable]::Border = $script:cBorder
+    if (-not $script:menuRenderer) {
+        $script:menuRenderer = New-Object System.Windows.Forms.ToolStripProfessionalRenderer ([CMColorTable]::new())
+        $script:menuRenderer.RoundedEdges = $false
+    }
+    # Set the GLOBAL renderer too, so nested submenus (e.g. "Add to group") and
+    # any dropdown match instead of falling back to the default light style.
+    [System.Windows.Forms.ToolStripManager]::Renderer = $script:menuRenderer
     $m.BackColor       = $script:cBar
     $m.ForeColor       = $script:cText
     $m.ShowImageMargin = $false
-    $m.Renderer        = New-Object System.Windows.Forms.ToolStripProfessionalRenderer ([CMColorTable]::new())
+    $m.Renderer        = $script:menuRenderer
 }
 function Apply-Theme {
     Set-ThemeColors
