@@ -16,6 +16,32 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
+# Custom color table so context menus match the theme: no white image-margin
+# gutter, and a hover highlight that keeps the (light or dark) text readable.
+# Colors are static fields set from the current theme before each menu shows.
+Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @"
+using System.Drawing;
+using System.Windows.Forms;
+public class CMColorTable : ProfessionalColorTable {
+    public static Color Bg     = Color.FromArgb(28,28,32);
+    public static Color Hover  = Color.FromArgb(58,58,68);
+    public static Color Border = Color.FromArgb(55,55,62);
+    public override Color ToolStripDropDownBackground       { get { return Bg; } }
+    public override Color ImageMarginGradientBegin          { get { return Bg; } }
+    public override Color ImageMarginGradientMiddle         { get { return Bg; } }
+    public override Color ImageMarginGradientEnd            { get { return Bg; } }
+    public override Color MenuItemSelected                  { get { return Hover; } }
+    public override Color MenuItemSelectedGradientBegin     { get { return Hover; } }
+    public override Color MenuItemSelectedGradientEnd       { get { return Hover; } }
+    public override Color MenuItemPressedGradientBegin      { get { return Bg; } }
+    public override Color MenuItemPressedGradientEnd        { get { return Bg; } }
+    public override Color MenuItemBorder                    { get { return Hover; } }
+    public override Color MenuBorder                        { get { return Border; } }
+    public override Color SeparatorDark                     { get { return Border; } }
+    public override Color SeparatorLight                    { get { return Border; } }
+}
+"@
+
 # ---------------------------------------------------------------- paths -----
 $Home_      = $env:USERPROFILE
 $StatusDir  = Join-Path $Home_ '.claude\session-status'
@@ -337,6 +363,7 @@ function Set-ThemeColors {
         $script:cDim    = [System.Drawing.Color]::FromArgb(100,116,139)
         $script:cBorder = [System.Drawing.Color]::FromArgb(205,209,218)
         $script:cField  = [System.Drawing.Color]::FromArgb(255,255,255)
+        $script:cHover  = [System.Drawing.Color]::FromArgb(210,216,228)
     } else {
         $script:cBg     = [System.Drawing.Color]::FromArgb(17,17,19)
         $script:cBar    = [System.Drawing.Color]::FromArgb(28,28,32)
@@ -344,7 +371,20 @@ function Set-ThemeColors {
         $script:cDim    = [System.Drawing.Color]::FromArgb(148,163,184)
         $script:cBorder = [System.Drawing.Color]::FromArgb(55,55,62)
         $script:cField  = [System.Drawing.Color]::FromArgb(38,38,44)
+        $script:cHover  = [System.Drawing.Color]::FromArgb(58,58,70)
     }
+}
+
+# Apply the dark/light theme + custom renderer to a context menu so it matches
+# the panel (no white gutter, readable hover). Call right after creating one.
+function Style-Menu($m) {
+    [CMColorTable]::Bg     = $script:cBar
+    [CMColorTable]::Hover  = $script:cHover
+    [CMColorTable]::Border = $script:cBorder
+    $m.BackColor       = $script:cBar
+    $m.ForeColor       = $script:cText
+    $m.ShowImageMargin = $false
+    $m.Renderer        = New-Object System.Windows.Forms.ToolStripProfessionalRenderer ([CMColorTable]::new())
 }
 function Apply-Theme {
     Set-ThemeColors
@@ -766,8 +806,7 @@ function Commit-Drag {
 # ------------------------------------------------------------ menu (≡) ------
 $btnMenu.Add_Click({
     $menu = New-Object System.Windows.Forms.ContextMenuStrip
-    $menu.BackColor = $cBar
-    $menu.ForeColor = $cText
+    Style-Menu $menu
     $all = Get-Sessions
 
     $hdr = New-Object System.Windows.Forms.ToolStripMenuItem('Pin sessions to watch:')
@@ -971,7 +1010,7 @@ function Refresh-Rows {
             # Ungrouped is a synthetic block: collapsible, but not renamable/movable.
             if (-not $blk.isUngrouped) {
                 $hMenu = New-Object System.Windows.Forms.ContextMenuStrip
-                $hMenu.BackColor = $cBar; $hMenu.ForeColor = $cText
+                Style-Menu $hMenu
                 $hRen = New-Object System.Windows.Forms.ToolStripMenuItem('Rename group...')
                 $hRen.Add_Click({ Rename-Group $grpName }.GetNewClosure())
                 [void]$hMenu.Items.Add($hRen)
@@ -1044,8 +1083,7 @@ function Refresh-Rows {
 
             # Right-click menu for this row: rename / group / reorder / unpin.
             $rowMenu = New-Object System.Windows.Forms.ContextMenuStrip
-            $rowMenu.BackColor = $cBar
-            $rowMenu.ForeColor = $cText
+            Style-Menu $rowMenu
             $miRename = New-Object System.Windows.Forms.ToolStripMenuItem('Rename...')
             $miRename.Add_Click({ Set-Name $sid $display }.GetNewClosure())
             [void]$rowMenu.Items.Add($miRename)
