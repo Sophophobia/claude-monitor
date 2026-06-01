@@ -695,6 +695,11 @@ $script:lastSig = '__init__'
 function Refresh-Rows {
     param([switch]$force)
 
+    # Never rebuild while a row is being dragged: clearing/recreating the rows
+    # would destroy the control under the cursor and freeze the drag. The drag's
+    # own MouseUp (Commit-Drag) re-renders once it finishes.
+    if ($script:dragRowOn) { return }
+
     $all = Get-Sessions
 
     # Never permanently unpin a session just because it vanished from $all. An
