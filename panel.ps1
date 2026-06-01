@@ -751,6 +751,35 @@ function Refresh-Rows {
     $script:LayoutGroups  = @()
     $script:LayoutGrouped = $grouped
 
+    # Drag handlers are defined ONCE here as plain (non-closure) scriptblocks so
+    # their inline `$script:` writes hit the real script scope (a GetNewClosure
+    # block would write to its own captured scope, leaving onMove/onUp blind).
+    # Per-row data is carried on each control's .Tag instead of a closure.
+    $onDown = {
+        param($snd, $e)
+        if ($e.Button -ne [System.Windows.Forms.MouseButtons]::Left) { return }
+        $info = $snd.Tag
+        if (-not $info) { return }
+        $script:dragSid     = $info.sid
+        $script:dragRow     = $info.row
+        $script:dragOrigTop = $info.row.Top
+        $script:dragStartY  = [System.Windows.Forms.Cursor]::Position.Y
+        $script:dragRowOn   = $true
+        $info.row.BringToFront()
+    }
+    $onMove = {
+        param($snd, $e)
+        if (-not $script:dragRowOn) { return }
+        $dy = [System.Windows.Forms.Cursor]::Position.Y - $script:dragStartY
+        $script:dragRow.Top = $script:dragOrigTop + $dy
+    }
+    $onUp = {
+        param($snd, $e)
+        if (-not $script:dragRowOn) { return }
+        $script:dragRowOn = $false
+        if ($script:dragRow.Top -ne $script:dragOrigTop) { Commit-Drag }
+    }
+
     $y = 4
     foreach ($blk in $ordered) {
         $collapsed = ($script:Collapsed.ContainsKey($blk.name) -and $script:Collapsed[$blk.name])
@@ -910,30 +939,10 @@ function Refresh-Rows {
             # Left-drag to reorder. In the flat view it just reorders; once groups
             # exist, dropping a row into another group's band also moves it into
             # that group (and dropping into the Ungrouped band removes it).
-            $row.Cursor = 'SizeAll'; $dot.Cursor = 'SizeAll'; $name.Cursor = 'SizeAll'; $stt.Cursor = 'SizeAll'
-            $onDown = {
-                param($snd, $e)
-                if ($e.Button -ne [System.Windows.Forms.MouseButtons]::Left) { return }
-                $script:dragSid     = $sid
-                $script:dragRow     = $row
-                $script:dragOrigTop = $row.Top
-                $script:dragStartY  = [System.Windows.Forms.Cursor]::Position.Y
-                $script:dragRowOn   = $true
-                $row.BringToFront()
-            }.GetNewClosure()
-            $onMove = {
-                param($snd, $e)
-                if (-not $script:dragRowOn) { return }
-                $dy = [System.Windows.Forms.Cursor]::Position.Y - $script:dragStartY
-                $script:dragRow.Top = $script:dragOrigTop + $dy
-            }
-            $onUp = {
-                param($snd, $e)
-                if (-not $script:dragRowOn) { return }
-                $script:dragRowOn = $false
-                if ($script:dragRow.Top -ne $script:dragOrigTop) { Commit-Drag }
-            }
+            $dragInfo = @{ row = $row; sid = $sid }
             foreach ($c in @($row, $dot, $name, $stt)) {
+                $c.Cursor = 'SizeAll'
+                $c.Tag = $dragInfo
                 $c.Add_MouseDown($onDown); $c.Add_MouseMove($onMove); $c.Add_MouseUp($onUp)
             }
 
