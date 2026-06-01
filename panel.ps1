@@ -40,6 +40,12 @@ $script:PinInfo = @{}   # sessionId -> @{ project; cwd; title } last-known ident
                         # ended pin still renders sensibly after its session record is gone.
 $script:pinInfoDirty = $false
 
+# Grouping: sessions can be sorted into named, collapsible groups.
+$script:Groups     = @{}   # sessionId -> group name (absent = ungrouped)
+$script:GroupOrder = @()   # ordered list of group names (display order of group blocks)
+$script:Collapsed  = @{}   # group name -> $true if collapsed
+$script:UngroupedName = 'Ungrouped'   # header shown for sessions in no group (only when groups exist)
+
 function Load-Config {
     try {
         if (Test-Path $ConfigPath) {
@@ -65,6 +71,17 @@ function Load-Config {
                 }
                 $script:PinInfo = $h
             }
+            if ($c.groups) {
+                $h = @{}
+                foreach ($p in $c.groups.PSObject.Properties) { if ($p.Value) { $h[$p.Name] = [string]$p.Value } }
+                $script:Groups = $h
+            }
+            if ($c.groupOrder) { $script:GroupOrder = @($c.groupOrder) }
+            if ($c.collapsed) {
+                $h = @{}
+                foreach ($p in $c.collapsed.PSObject.Properties) { $h[$p.Name] = [bool]$p.Value }
+                $script:Collapsed = $h
+            }
         }
     } catch { }
 }
@@ -72,11 +89,14 @@ function Load-Config {
 function Save-Config {
     try {
         $obj = [ordered]@{
-            pins    = @($script:Pins)
-            x       = $script:PosX
-            y       = $script:PosY
-            names   = $script:Names
-            pinInfo = $script:PinInfo
+            pins       = @($script:Pins)
+            x          = $script:PosX
+            y          = $script:PosY
+            names      = $script:Names
+            pinInfo    = $script:PinInfo
+            groups     = $script:Groups
+            groupOrder = @($script:GroupOrder)
+            collapsed  = $script:Collapsed
         }
         ($obj | ConvertTo-Json -Compress) | Set-Content -Path $ConfigPath -Encoding UTF8
     } catch { }
@@ -290,6 +310,8 @@ $fIcon   = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontSt
 $W       = 290
 $TitleH  = 30
 $RowH    = 28
+$HeaderH = 22
+$fGroup  = New-Object System.Drawing.Font('Segoe UI', 8.5, [System.Drawing.FontStyle]::Bold)
 $script:tip = New-Object System.Windows.Forms.ToolTip
 $script:tip.AutoPopDelay = 8000
 $script:tip.InitialDelay = 350
@@ -404,11 +426,107 @@ foreach ($ctl in @($bar, $title)) {
 function Toggle-Pin($sid) {
     if ($script:Pins -contains $sid) {
         $script:Pins = @($script:Pins | Where-Object { $_ -ne $sid })
+        if ($script:Groups.ContainsKey($sid)) { $script:Groups.Remove($sid) }
     } else {
         $script:Pins = @($script:Pins) + $sid
     }
+    Normalize-Groups
     Save-Config
     Refresh-Rows -force
+}
+
+# --------------------------------------------------------------- groups -----
+function Get-GroupOf($sid) {
+    if ($script:Groups.ContainsKey($sid) -and $script:Groups[$sid]) { return [string]$script:Groups[$sid] }
+    return ''
+}
+
+# Drop memberships for sids no longer pinned and prune empty groups so the
+# group list never shows a header with nothing under it.
+function Normalize-Groups {
+    $pinset = @{}; foreach ($p in $script:Pins) { $pinset[$p] = $true }
+    foreach ($k in @($script:Groups.Keys)) { if (-not $pinset.ContainsKey($k)) { $script:Groups.Remove($k) } }
+    $used = @{}; foreach ($v in $script:Groups.Values) { if ($v) { $used[$v] = $true } }
+    $script:GroupOrder = @($script:GroupOrder | Where-Object { $used.ContainsKey($_) })
+    foreach ($v in @($used.Keys)) { if ($script:GroupOrder -notcontains $v) { $script:GroupOrder = @($script:GroupOrder) + $v } }
+    foreach ($k in @($script:Collapsed.Keys)) {
+        if ($k -ne $script:UngroupedName -and -not $used.ContainsKey($k)) { $script:Collapsed.Remove($k) }
+    }
+}
+
+function Set-Group($sid, $name) {
+    $name = ([string]$name).Trim()
+    if (-not $name) { return }
+    if ($name.Length -gt 40) { $name = $name.Substring(0, 40) }
+    $script:Groups[$sid] = $name
+    if ($script:GroupOrder -notcontains $name) { $script:GroupOrder = @($script:GroupOrder) + $name }
+    Normalize-Groups
+    Save-Config
+    Refresh-Rows -force
+}
+
+function Remove-FromGroup($sid) {
+    if ($script:Groups.ContainsKey($sid)) { $script:Groups.Remove($sid) }
+    Normalize-Groups
+    Save-Config
+    Refresh-Rows -force
+}
+
+function New-GroupFor($sid) {
+    $new = [Microsoft.VisualBasic.Interaction]::InputBox("Name for the new group:", "New group", "")
+    if (-not [string]::IsNullOrWhiteSpace($new)) { Set-Group $sid $new }
+}
+
+function Rename-Group($old) {
+    $new = [Microsoft.VisualBasic.Interaction]::InputBox("Rename group:", "Rename group", $old)
+    $new = ([string]$new).Trim()
+    if (-not $new -or $new -eq $old) { return }
+    if ($new.Length -gt 40) { $new = $new.Substring(0, 40) }
+    foreach ($k in @($script:Groups.Keys)) { if ($script:Groups[$k] -eq $old) { $script:Groups[$k] = $new } }
+    $script:GroupOrder = @($script:GroupOrder | ForEach-Object { if ($_ -eq $old) { $new } else { $_ } })
+    if ($script:Collapsed.ContainsKey($old)) { $script:Collapsed[$new] = $script:Collapsed[$old]; $script:Collapsed.Remove($old) }
+    $seen = @{}; $script:GroupOrder = @($script:GroupOrder | Where-Object { if ($seen.ContainsKey($_)) { $false } else { $seen[$_] = $true; $true } })
+    Normalize-Groups
+    Save-Config
+    Refresh-Rows -force
+}
+
+function Move-Group($name, $delta) {
+    $list = @($script:GroupOrder)
+    $i = [array]::IndexOf($list, [string]$name)
+    if ($i -lt 0) { return }
+    $j = $i + $delta
+    if ($j -lt 0 -or $j -ge $list.Count) { return }
+    $tmp = $list[$i]; $list[$i] = $list[$j]; $list[$j] = $tmp
+    $script:GroupOrder = @($list)
+    Save-Config
+    Refresh-Rows -force
+}
+
+function Toggle-Collapse($name) {
+    if ($script:Collapsed.ContainsKey($name) -and $script:Collapsed[$name]) { $script:Collapsed.Remove($name) }
+    else { $script:Collapsed[$name] = $true }
+    Save-Config
+    Refresh-Rows -force
+}
+
+# Returns the render plan: an ordered list of group blocks. When no groups are
+# defined the single block has hasHeader=$false (flat list, unchanged UX).
+function Get-OrderedGroups {
+    $result = @()
+    if ($script:GroupOrder.Count -eq 0) {
+        $result += [pscustomobject]@{ name = ''; members = @($script:Pins); isUngrouped = $true; hasHeader = $false }
+        return , $result
+    }
+    foreach ($g in $script:GroupOrder) {
+        $members = @($script:Pins | Where-Object { (Get-GroupOf $_) -eq $g })
+        $result += [pscustomobject]@{ name = $g; members = $members; isUngrouped = $false; hasHeader = $true }
+    }
+    $ung = @($script:Pins | Where-Object { -not (Get-GroupOf $_) })
+    if ($ung.Count -gt 0) {
+        $result += [pscustomobject]@{ name = $script:UngroupedName; members = $ung; isUngrouped = $true; hasHeader = $true }
+    }
+    return , $result
 }
 
 # ------------------------------------------------------------- renaming -----
@@ -438,7 +556,12 @@ function Move-Pin($sid, $delta) {
     $list = @($script:Pins)
     $i = [array]::IndexOf($list, [string]$sid)
     if ($i -lt 0) { return }
+    # Move within the session's own group: find the nearest pin in the same group
+    # in the requested direction and swap with it (pins of other groups in between
+    # keep their slots, so only same-group order changes).
+    $g = Get-GroupOf $sid
     $j = $i + $delta
+    while ($j -ge 0 -and $j -lt $list.Count -and (Get-GroupOf $list[$j]) -ne $g) { $j += $delta }
     if ($j -lt 0 -or $j -ge $list.Count) { return }
     $tmp = $list[$i]; $list[$i] = $list[$j]; $list[$j] = $tmp
     $script:Pins = @($list)
@@ -502,6 +625,7 @@ $btnMenu.Add_Click({
         # Keep any pin that resolves to a non-ended row (live session, or an idle
         # conversation whose transcript still exists); drop only truly ended ones.
         $script:Pins = @($script:Pins | Where-Object { (Resolve-Pin $_ $all2).state -ne 'ended' })
+        Normalize-Groups
         Save-Config
         Refresh-Rows -force
     })
@@ -526,12 +650,22 @@ function Refresh-Rows {
     # would otherwise be dropped forever instead of shown as "Ended". Pins are
     # only removed via the explicit "Unpin ended sessions" menu or per-row Unpin.
 
-    # Signature to avoid needless rebuilds (no flicker when nothing changed).
-    $sig = ($script:Pins | ForEach-Object {
-        $s = Resolve-Pin $_ $all
-        $nm = if ($script:Names.ContainsKey($_)) { $script:Names[$_] } else { '' }
-        '{0}:{1}:{2}:{3}:{4}' -f $_, $s.state, $s.live, $s.title, $nm
-    }) -join '|'
+    # Build the render plan (group blocks) and a signature to avoid needless
+    # rebuilds. Resolve every pin (so pinInfo caching still runs) but only render
+    # members of expanded groups.
+    $ordered = Get-OrderedGroups
+    $grouped = ($script:GroupOrder.Count -gt 0)
+    $sigParts = @()
+    foreach ($blk in $ordered) {
+        $col = if ($script:Collapsed.ContainsKey($blk.name) -and $script:Collapsed[$blk.name]) { 1 } else { 0 }
+        $sigParts += ('H:{0}:{1}:{2}:{3}' -f $blk.name, $blk.hasHeader, $col, $blk.members.Count)
+        foreach ($sid in $blk.members) {
+            $s = Resolve-Pin $sid $all
+            $nm = if ($script:Names.ContainsKey($sid)) { $script:Names[$sid] } else { '' }
+            $sigParts += ('{0}:{1}:{2}:{3}:{4}' -f $sid, $s.state, $s.live, $s.title, $nm)
+        }
+    }
+    $sig = $sigParts -join '|'
     if ($script:pinInfoDirty) { Save-Config; $script:pinInfoDirty = $false }
     if (-not $force -and $sig -eq $script:lastSig) { return }
     $script:lastSig = $sig
@@ -539,8 +673,7 @@ function Refresh-Rows {
     $content.SuspendLayout()
     $content.Controls.Clear()
 
-    $rows = @($script:Pins)
-    if ($rows.Count -eq 0) {
+    if (@($script:Pins).Count -eq 0) {
         $hint = New-Object System.Windows.Forms.Label
         $hint.Text      = 'No sessions pinned.  Click  ' + [char]0x2261 + '  to pick.'
         $hint.ForeColor = $cDim
@@ -550,10 +683,68 @@ function Refresh-Rows {
         $hint.TextAlign = 'MiddleCenter'
         $content.Controls.Add($hint)
         $form.Height = $TitleH + $RowH + 8
-    } else {
-        $y = 4
-        $rowIdx = 0
-        foreach ($sid in $rows) {
+        $content.ResumeLayout()
+        return
+    }
+
+    $y = 4
+    foreach ($blk in $ordered) {
+        $collapsed = ($script:Collapsed.ContainsKey($blk.name) -and $script:Collapsed[$blk.name])
+
+        # ---- group header ----
+        if ($blk.hasHeader) {
+            $grpName = $blk.name
+            $gIdx = [array]::IndexOf(@($script:GroupOrder), $grpName)
+            $chev = if ($collapsed) { [char]0x25B8 } else { [char]0x25BE }   # > / v
+
+            $hp = New-Object System.Windows.Forms.Panel
+            $hp.Location  = New-Object System.Drawing.Point(0, $y)
+            $hp.Size      = New-Object System.Drawing.Size($W, $HeaderH)
+            $hp.BackColor = $cBar
+
+            $hl = New-Object System.Windows.Forms.Label
+            $hl.Text      = ('{0}  {1}  ({2})' -f $chev, $grpName, $blk.members.Count)
+            $hl.ForeColor = $cDim
+            $hl.Font      = $fGroup
+            $hl.AutoSize  = $false
+            $hl.Location  = New-Object System.Drawing.Point(8, 0)
+            $hl.Size      = New-Object System.Drawing.Size(($W - 16), $HeaderH)
+            $hl.TextAlign = 'MiddleLeft'
+            $hl.Cursor    = 'Hand'
+            $hp.Controls.Add($hl)
+
+            $toggle = { Toggle-Collapse $grpName }.GetNewClosure()
+            $hp.Add_Click($toggle); $hl.Add_Click($toggle)
+
+            # Ungrouped is a synthetic block: collapsible, but not renamable/movable.
+            if (-not $blk.isUngrouped) {
+                $hMenu = New-Object System.Windows.Forms.ContextMenuStrip
+                $hMenu.BackColor = $cBar; $hMenu.ForeColor = $cText
+                $hRen = New-Object System.Windows.Forms.ToolStripMenuItem('Rename group...')
+                $hRen.Add_Click({ Rename-Group $grpName }.GetNewClosure())
+                [void]$hMenu.Items.Add($hRen)
+                [void]$hMenu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+                $hUp = New-Object System.Windows.Forms.ToolStripMenuItem('Move group up')
+                $hUp.Enabled = ($gIdx -gt 0)
+                $hUp.Add_Click({ Move-Group $grpName -1 }.GetNewClosure())
+                [void]$hMenu.Items.Add($hUp)
+                $hDn = New-Object System.Windows.Forms.ToolStripMenuItem('Move group down')
+                $hDn.Enabled = ($gIdx -lt (@($script:GroupOrder).Count - 1))
+                $hDn.Add_Click({ Move-Group $grpName 1 }.GetNewClosure())
+                [void]$hMenu.Items.Add($hDn)
+                $hp.ContextMenuStrip = $hMenu; $hl.ContextMenuStrip = $hMenu
+            }
+
+            $content.Controls.Add($hp)
+            $y += $HeaderH
+            if ($collapsed) { continue }
+        }
+
+        # ---- member rows ----
+        $indent = if ($blk.hasHeader) { 16 } else { 0 }
+        $mCount = $blk.members.Count
+        $mIdx = 0
+        foreach ($sid in $blk.members) {
             $s = Resolve-Pin $sid $all
             $st = Get-StateStyle $s.state $s.live
 
@@ -567,7 +758,7 @@ function Refresh-Rows {
             $dot.ForeColor = $st.color
             $dot.Font      = $fIcon
             $dot.AutoSize  = $false
-            $dot.Location  = New-Object System.Drawing.Point(10, 0)
+            $dot.Location  = New-Object System.Drawing.Point((10 + $indent), 0)
             $dot.Size      = New-Object System.Drawing.Size(18, $RowH)
             $dot.TextAlign = 'MiddleCenter'
             $row.Controls.Add($dot)
@@ -579,12 +770,12 @@ function Refresh-Rows {
             $name.Font         = $fName
             $name.AutoSize     = $false
             $name.AutoEllipsis = $true
-            $name.Location     = New-Object System.Drawing.Point(32, 0)
-            $name.Size         = New-Object System.Drawing.Size(150, $RowH)
+            $name.Location     = New-Object System.Drawing.Point((32 + $indent), 0)
+            $name.Size         = New-Object System.Drawing.Size((150 - $indent), $RowH)
             $name.TextAlign    = 'MiddleLeft'
             $row.Controls.Add($name)
             $shortId = $sid.Substring(0, [Math]::Min(8, $sid.Length))
-            $tipText = "{0}`r`nid {1}`r`nDrag to reorder. Rename: right-click, or type  #name <label>  in the session." -f $s.project, $shortId
+            $tipText = "{0}`r`nid {1}`r`nRight-click: rename, group, reorder.  Or type  #name <label>  in the session." -f $s.project, $shortId
             $script:tip.SetToolTip($name, $tipText)
             $script:tip.SetToolTip($dot, $tipText)
 
@@ -598,7 +789,7 @@ function Refresh-Rows {
             $stt.TextAlign = 'MiddleRight'
             $row.Controls.Add($stt)
 
-            # Right-click menu for this row: rename / reset / unpin.
+            # Right-click menu for this row: rename / group / reorder / unpin.
             $rowMenu = New-Object System.Windows.Forms.ContextMenuStrip
             $rowMenu.BackColor = $cBar
             $rowMenu.ForeColor = $cText
@@ -611,12 +802,34 @@ function Refresh-Rows {
                 [void]$rowMenu.Items.Add($miReset)
             }
             [void]$rowMenu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+
+            # Add to group -> existing groups + New group...
+            $miAdd = New-Object System.Windows.Forms.ToolStripMenuItem('Add to group')
+            $curG = Get-GroupOf $sid
+            foreach ($gname in @($script:GroupOrder)) {
+                $sub = New-Object System.Windows.Forms.ToolStripMenuItem($gname)
+                if ($curG -eq $gname) { $sub.Checked = $true }
+                $sub.Add_Click({ Set-Group $sid $gname }.GetNewClosure())
+                [void]$miAdd.DropDownItems.Add($sub)
+            }
+            if (@($script:GroupOrder).Count -gt 0) { [void]$miAdd.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripSeparator)) }
+            $miNew = New-Object System.Windows.Forms.ToolStripMenuItem('New group...')
+            $miNew.Add_Click({ New-GroupFor $sid }.GetNewClosure())
+            [void]$miAdd.DropDownItems.Add($miNew)
+            [void]$rowMenu.Items.Add($miAdd)
+            if ($curG) {
+                $miRem = New-Object System.Windows.Forms.ToolStripMenuItem('Remove from group')
+                $miRem.Add_Click({ Remove-FromGroup $sid }.GetNewClosure())
+                [void]$rowMenu.Items.Add($miRem)
+            }
+            [void]$rowMenu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+
             $miUp = New-Object System.Windows.Forms.ToolStripMenuItem('Move up')
-            $miUp.Enabled = ($rowIdx -gt 0)
+            $miUp.Enabled = ($mIdx -gt 0)
             $miUp.Add_Click({ Move-Pin $sid -1 }.GetNewClosure())
             [void]$rowMenu.Items.Add($miUp)
             $miDown = New-Object System.Windows.Forms.ToolStripMenuItem('Move down')
-            $miDown.Enabled = ($rowIdx -lt ($rows.Count - 1))
+            $miDown.Enabled = ($mIdx -lt ($mCount - 1))
             $miDown.Add_Click({ Move-Pin $sid 1 }.GetNewClosure())
             [void]$rowMenu.Items.Add($miDown)
             [void]$rowMenu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
@@ -628,40 +841,44 @@ function Refresh-Rows {
             $dot.ContextMenuStrip  = $rowMenu
             $stt.ContextMenuStrip  = $rowMenu
 
-            # Left-drag a row up/down to reorder it.
-            $row.Cursor = 'SizeAll'; $dot.Cursor = 'SizeAll'; $name.Cursor = 'SizeAll'; $stt.Cursor = 'SizeAll'
-            $onDown = {
-                param($snd, $e)
-                if ($e.Button -ne [System.Windows.Forms.MouseButtons]::Left) { return }
-                $script:dragSid     = $sid
-                $script:dragRow     = $row
-                $script:dragOrigTop = $row.Top
-                $script:dragStartY  = [System.Windows.Forms.Cursor]::Position.Y
-                $script:dragRowOn   = $true
-                $row.BringToFront()
-            }.GetNewClosure()
-            $onMove = {
-                param($snd, $e)
-                if (-not $script:dragRowOn) { return }
-                $dy = [System.Windows.Forms.Cursor]::Position.Y - $script:dragStartY
-                $script:dragRow.Top = $script:dragOrigTop + $dy
-            }
-            $onUp = {
-                param($snd, $e)
-                if (-not $script:dragRowOn) { return }
-                $script:dragRowOn = $false
-                if ($script:dragRow.Top -ne $script:dragOrigTop) { Commit-Drag }
-            }
-            foreach ($c in @($row, $dot, $name, $stt)) {
-                $c.Add_MouseDown($onDown); $c.Add_MouseMove($onMove); $c.Add_MouseUp($onUp)
+            # Left-drag to reorder is only enabled in the flat (ungrouped) view;
+            # when groups exist, reordering is via right-click Move up/down so a
+            # drag can't silently break group clustering.
+            if (-not $grouped) {
+                $row.Cursor = 'SizeAll'; $dot.Cursor = 'SizeAll'; $name.Cursor = 'SizeAll'; $stt.Cursor = 'SizeAll'
+                $onDown = {
+                    param($snd, $e)
+                    if ($e.Button -ne [System.Windows.Forms.MouseButtons]::Left) { return }
+                    $script:dragSid     = $sid
+                    $script:dragRow     = $row
+                    $script:dragOrigTop = $row.Top
+                    $script:dragStartY  = [System.Windows.Forms.Cursor]::Position.Y
+                    $script:dragRowOn   = $true
+                    $row.BringToFront()
+                }.GetNewClosure()
+                $onMove = {
+                    param($snd, $e)
+                    if (-not $script:dragRowOn) { return }
+                    $dy = [System.Windows.Forms.Cursor]::Position.Y - $script:dragStartY
+                    $script:dragRow.Top = $script:dragOrigTop + $dy
+                }
+                $onUp = {
+                    param($snd, $e)
+                    if (-not $script:dragRowOn) { return }
+                    $script:dragRowOn = $false
+                    if ($script:dragRow.Top -ne $script:dragOrigTop) { Commit-Drag }
+                }
+                foreach ($c in @($row, $dot, $name, $stt)) {
+                    $c.Add_MouseDown($onDown); $c.Add_MouseMove($onMove); $c.Add_MouseUp($onUp)
+                }
             }
 
             $content.Controls.Add($row)
             $y += $RowH
-            $rowIdx++
+            $mIdx++
         }
-        $form.Height = $TitleH + $y + 6
     }
+    $form.Height = $TitleH + $y + 6
 
     $content.ResumeLayout()
 }
