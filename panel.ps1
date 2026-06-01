@@ -1119,15 +1119,23 @@ function Refresh-Rows {
 
             # Add to group -> existing groups + New group...
             $miAdd = New-Object System.Windows.Forms.ToolStripMenuItem('Add to group')
+            # Submenu items do NOT inherit the parent menu's ForeColor, so on the
+            # dark background their default (black) text is invisible. Style the
+            # dropdown and set each item's color explicitly.
+            $miAdd.DropDown.BackColor       = $cBar
+            $miAdd.DropDown.ForeColor       = $cText
+            $miAdd.DropDown.ShowImageMargin = $false
             $curG = Get-GroupOf $sid
             foreach ($gname in @($script:GroupOrder)) {
-                $sub = New-Object System.Windows.Forms.ToolStripMenuItem($gname)
-                if ($curG -eq $gname) { $sub.Checked = $true }
+                $mark = if ($curG -eq $gname) { [char]0x2713 + ' ' } else { '' }
+                $sub = New-Object System.Windows.Forms.ToolStripMenuItem(($mark + $gname))
+                $sub.ForeColor = $cText
                 $sub.Add_Click({ Set-Group $sid $gname }.GetNewClosure())
                 [void]$miAdd.DropDownItems.Add($sub)
             }
             if (@($script:GroupOrder).Count -gt 0) { [void]$miAdd.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripSeparator)) }
             $miNew = New-Object System.Windows.Forms.ToolStripMenuItem('New group...')
+            $miNew.ForeColor = $cText
             $miNew.Add_Click({ New-GroupFor $sid }.GetNewClosure())
             [void]$miAdd.DropDownItems.Add($miNew)
             [void]$rowMenu.Items.Add($miAdd)
