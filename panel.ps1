@@ -1000,8 +1000,9 @@ function Refresh-Rows {
 
             if ($attn.Count) {
                 $top = $attn[0]
-                $txt = if ($attn.Count -gt 1) { '{0} · {1} · {2}' -f (Get-Display $top.sid $top.s), $top.st.label, $attn.Count }
-                       else { '{0} · {1}' -f (Get-Display $top.sid $top.s), $top.st.label }
+                $sep = ' ' + [char]0x00B7 + ' '   # middle dot, built numerically to stay encoding-safe
+                $txt = if ($attn.Count -gt 1) { (Get-Display $top.sid $top.s) + $sep + $top.st.label + $sep + $attn.Count }
+                       else { (Get-Display $top.sid $top.s) + $sep + $top.st.label }
                 $txtColor = $top.st.color
             } else {
                 $txt = '{0} session{1}' -f $total, $(if ($total -eq 1) { '' } else { 's' })
