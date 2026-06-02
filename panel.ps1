@@ -16,6 +16,47 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
+# Win32 helper to bring the Claude desktop app window to the foreground when a
+# session row is clicked. Windows normally blocks a background process from
+# stealing focus, so we briefly attach to the current foreground thread's input
+# queue (the standard work-around) before SetForegroundWindow.
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class FgWin {
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int n);
+    [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool attach);
+    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+    public static void Bring(IntPtr h) {
+        if (h == IntPtr.Zero) return;
+        if (IsIconic(h)) ShowWindow(h, 9);      // SW_RESTORE
+        uint pid;
+        uint fg  = GetWindowThreadProcessId(GetForegroundWindow(), out pid);
+        uint cur = GetCurrentThreadId();
+        if (fg != cur) AttachThreadInput(cur, fg, true);
+        ShowWindow(h, 5);                        // SW_SHOW
+        SetForegroundWindow(h);
+        if (fg != cur) AttachThreadInput(cur, fg, false);
+    }
+}
+"@
+
+# Bring the Claude desktop app's main window to the foreground. There are many
+# "claude" processes (one backend per conversation); only the app window process
+# has a MainWindowHandle. We can't switch to a *specific* conversation (the app
+# exposes no working external route for that), so this just surfaces the app.
+function Focus-Claude {
+    try {
+        $p = Get-Process claude -ErrorAction SilentlyContinue |
+             Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+        if ($p) { [FgWin]::Bring($p.MainWindowHandle) }
+    } catch { }
+}
+
 # Custom color table so context menus match the theme: no white image-margin
 # gutter, and a hover highlight that keeps the (light or dark) text readable.
 # Colors are static fields set from the current theme before each menu shows.
@@ -971,7 +1012,9 @@ function Refresh-Rows {
 
         $content.SuspendLayout()
         $content.Controls.Clear()
-        $expand = { Set-Compact $false }
+        # In compact mode the single line is just an indicator: clicking it
+        # surfaces the Claude app. Expand/collapse is the title-bar arrow.
+        $openClaude = { Focus-Claude }
 
         if ($total -eq 0) {
             $hint = New-Object System.Windows.Forms.Label
@@ -984,7 +1027,7 @@ function Refresh-Rows {
             $row.Location = New-Object System.Drawing.Point(0, 4)
             $row.Size = New-Object System.Drawing.Size($W, $RowH)
             $row.BackColor = $cBg; $row.Cursor = 'Hand'
-            $row.Add_Click($expand)
+            $row.Add_Click($openClaude)
 
             $x = 10
             foreach ($it in $items) {
@@ -992,7 +1035,7 @@ function Refresh-Rows {
                 $d.Text = [char]0x25CF; $d.ForeColor = $it.st.color; $d.Font = $fIcon
                 $d.AutoSize = $false; $d.Location = New-Object System.Drawing.Point($x, 0)
                 $d.Size = New-Object System.Drawing.Size(14, $RowH); $d.TextAlign = 'MiddleCenter'
-                $d.Cursor = 'Hand'; $d.Add_Click($expand)
+                $d.Cursor = 'Hand'; $d.Add_Click($openClaude)
                 $script:tip.SetToolTip($d, ('{0} - {1}' -f (Get-Display $it.sid $it.s), $it.st.label))
                 $row.Controls.Add($d)
                 $x += 14
@@ -1014,7 +1057,7 @@ function Refresh-Rows {
             $lbl.AutoSize = $false; $lbl.AutoEllipsis = $true
             $lbl.Location = New-Object System.Drawing.Point($tx, 0)
             $lbl.Size = New-Object System.Drawing.Size(($W - $tx - 10), $RowH); $lbl.TextAlign = 'MiddleRight'
-            $lbl.Cursor = 'Hand'; $lbl.Add_Click($expand)
+            $lbl.Cursor = 'Hand'; $lbl.Add_Click($openClaude)
             $row.Controls.Add($lbl)
 
             $content.Controls.Add($row)
@@ -1099,7 +1142,8 @@ function Refresh-Rows {
         param($snd, $e)
         if (-not $script:dragRowOn) { return }
         $script:dragRowOn = $false
-        if ($script:dragRow.Top -ne $script:dragOrigTop) { Commit-Drag }
+        # Moved = reorder/regroup; didn't move = a plain click -> surface the app.
+        if ($script:dragRow.Top -ne $script:dragOrigTop) { Commit-Drag } else { Focus-Claude }
     }
 
     $y = 4
@@ -1192,7 +1236,7 @@ function Refresh-Rows {
             $name.TextAlign    = 'MiddleLeft'
             $row.Controls.Add($name)
             $shortId = $sid.Substring(0, [Math]::Min(8, $sid.Length))
-            $tipText = "{0}`r`nid {1}`r`nRight-click: rename, group, reorder.  Or type  #name <label>  in the session." -f $s.project, $shortId
+            $tipText = "{0}`r`nid {1}`r`nClick: bring Claude to front.  Drag: reorder / move between groups.  Right-click: rename, group." -f $s.project, $shortId
             $script:tip.SetToolTip($name, $tipText)
             $script:tip.SetToolTip($dot, $tipText)
 

@@ -98,13 +98,16 @@ and it stays unpinned; a later manual drag to another group is never overridden.
   right-clicking a header lets you **rename** or **move the whole group** up/down.
   Sessions in no group are shown under an **Ungrouped** header. A group vanishes
   automatically once its last member leaves.
+- **Jump to Claude:** click a session row (a plain click, not a drag) to bring
+  the Claude app window to the front. (It surfaces the app; it can't switch to
+  that specific conversation — the desktop app exposes no working way to do that.)
 - **Reorder:** drag a row up or down, or right-click → Move up / Move down. When
   you have groups, dragging a row into another group's band also **moves it into
   that group** (drop it on the **Ungrouped** band to take it out); Move up/down
   stays within the group.
 - **Move:** drag the title bar. Position is remembered.
 - **Theme:** click the menu (≡) → **Switch to light/dark theme**. Dark by default; the choice is remembered.
-- **Compact mode:** click ▴ in the title bar to collapse the panel to a single line: one status dot per session (colored by state, hover to name it) plus the top session needing your **answer**/**permission** (permission first) and a count, or just the session count when all is calm. Click anywhere or ▾ to expand.
+- **Compact mode:** click ▴ in the title bar to collapse the panel to a single line: one status dot per session (colored by state, hover to name it) plus the top session needing your **answer**/**permission** (permission first) and a count, or just the session count when all is calm. Clicking the line brings the Claude app to the front; use the ▾ arrow to expand.
 - **Close:** click ✕ (the panel only; hooks keep running and cost ~nothing).
 - **Autostart:** `install.ps1 -Startup`, or drop a shortcut to `start-panel.vbs`
   into the `shell:startup` folder. Remove that shortcut to disable.
@@ -228,12 +231,14 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
   右键 → **Remove from group** 移出分组。分组标题**可折叠**（点一下收起/展开，状态会被
   记住），右键标题可以**重命名**或把**整组上下移动**。不在任何分组里的会话归在
   **Ungrouped** 标题下。某个分组的最后一个成员离开后，这个分组会自动消失。
+- **跳到 Claude：** 左键单击某行会话（点一下、别拖）会把 Claude 应用窗口提到前台。
+  （只能把 App 切到前台，没法切到那个具体对话——桌面 App 没有可用的对外入口。）
 - **调整顺序：** 拖动某一行上下移动，或右键 → Move up / Move down。建了分组之后，把某行
   **拖到另一个分组的区域**就会**把它加入那个组**（拖到 **Ungrouped** 区域则移出分组）；
   右键 Move up/down 只在本组内移动。
 - **移动：** 拖标题栏，位置会被记住。
 - **主题：** 点 ≡ 菜单 → **Switch to light/dark theme** 切换亮/暗主题。默认暗色，选择会被记住。
-- **超折叠模式：** 点标题栏的 ▴ 收成一行：每个会话一个状态点（按状态上色，hover 看名字），外加最需要处理的那条（**回答**/**权限**，permission 优先）+ 总数；都没事时显示会话总数。点任意处或 ▾ 展开。
+- **超折叠模式：** 点标题栏的 ▴ 收成一行：每个会话一个状态点（按状态上色，hover 看名字），外加最需要处理的那条（**回答**/**权限**，permission 优先）+ 总数；都没事时显示会话总数。点这一行会把 Claude 提到前台；用 ▾ 箭头展开。
 - **关闭：** 点 ✕（只关面板；hooks 继续跑，几乎不耗资源）。
 - **开机自启：** `install.ps1 -Startup`，或把 `start-panel.vbs` 的快捷方式放进 `shell:startup` 文件夹。删掉那个快捷方式即可取消。
 
