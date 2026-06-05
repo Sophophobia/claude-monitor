@@ -232,8 +232,8 @@ $script:LogPath    = Join-Path $env:APPDATA 'Claude\logs\main.log'
 $script:LogPos     = $null            # byte offset parsed so far (incremental tail)
 $script:cwIsAgent  = @{}              # local_id -> $true if it is an agent-mode (Cowork) session
 $script:cwTitle    = @{}              # local_id -> app conversation title
-$script:cwState    = @{}              # local_id -> last lifecycle state
-$script:cwLast     = @{}              # local_id -> [datetime] last activity
+$script:cwTurn     = @{}              # local_id -> $true if a turn is currently in progress
+$script:cwLast     = @{}              # local_id -> [datetime] last activity (any log line)
 $script:cwOpenPerm = @{}              # requestId -> @{ id=local_id; tool=toolName }
 
 function Update-LogState {
@@ -261,21 +261,38 @@ function Update-LogState {
             # or its on-disk session folder references it.
             if (($l -match 'LocalAgentModeSession' -or $l -match 'local-agent-mode-sessions') -and $l -match '(local_[0-9a-f\-]+)') {
                 $script:cwIsAgent[$matches[1]] = $true
-                if ($ts) { $script:cwLast[$matches[1]] = $ts }
             }
             if ($l -match "Updated session (local_[0-9a-f\-]+): \{ title: '(.*?)', titleSource:") {
-                $script:cwTitle[$matches[1]] = $matches[2]; if ($ts) { $script:cwLast[$matches[1]] = $ts }
+                $script:cwTitle[$matches[1]] = $matches[2]
+            }
+            # Turn START / CONTINUE vs END. We don't trust the last [Lifecycle]
+            # line alone (it scrolls out of the tail on a long turn); instead any
+            # ongoing work line (message output, tool permission) re-asserts that a
+            # turn is active, and explicit end events clear it.
+            elseif ($l -match '(?:LocalAgentModeSessions\.sendMessage: sessionId=|Starting local session )(local_[0-9a-f\-]+)') {
+                $script:cwTurn[$matches[1]] = $true
             }
             elseif ($l -match '\[Lifecycle\] Session (local_[0-9a-f\-]+): .+ (?:→|->) (\w+)') {
-                $script:cwState[$matches[1]] = $matches[2]; if ($ts) { $script:cwLast[$matches[1]] = $ts }
+                $to = $matches[2]
+                if ($to -eq 'running' -or $to -eq 'initializing') { $script:cwTurn[$matches[1]] = $true }
+                elseif ($to -eq 'idle' -or $to -eq 'stopping') { $script:cwTurn[$matches[1]] = $false }
+            }
+            elseif ($l -match '(?:\[Result\] Turn (?:succeeded|failed) for session |\[Stop hook\] Query completed for session )(local_[0-9a-f\-]+)') {
+                $script:cwTurn[$matches[1]] = $false
             }
             elseif ($l -match 'Emitted tool permission request ([0-9a-f\-]+) for (\S+) in session (local_[0-9a-f\-]+)') {
                 $script:cwOpenPerm[$matches[1]] = @{ id = $matches[3]; tool = $matches[2] }
-                if ($ts) { $script:cwLast[$matches[3]] = $ts }
+                $script:cwTurn[$matches[3]] = $true
             }
             elseif ($l -match 'Received permission response for ([0-9a-f\-]+)') {
                 [void]$script:cwOpenPerm.Remove($matches[1])
             }
+            elseif ($l -match 'Loaded \d+ messages from transcript for session (local_[0-9a-f\-]+)') {
+                $script:cwTurn[$matches[1]] = $true   # transcript grew -> agent is producing output
+            }
+            # Generic activity stamp: most session lines say "... session local_X".
+            # A working session emits these constantly; an idle one is silent.
+            if ($ts -and $l -match 'session (local_[0-9a-f\-]+)') { $script:cwLast[$matches[1]] = $ts }
         }
     } catch { }
 }
@@ -295,17 +312,22 @@ function Get-CoworkSessions {
         }
         foreach ($id in @($script:cwIsAgent.Keys)) {
             $last   = $script:cwLast[$id]
-            $recent = $last -and (($now - $last).TotalMinutes -lt $staleMin)
-            if (-not $recent -and ($script:Pins -notcontains $id)) { continue }   # don't flood the menu with old sessions
+            $live   = $last -and (($now - $last).TotalMinutes -lt $staleMin)
+            if (-not $live -and ($script:Pins -notcontains $id)) { continue }   # don't flood the menu with old sessions
+            # "Working" = a turn is flagged active AND there was log activity in the
+            # last ~90s. The activity gate is a safety net: if an end event was
+            # missed (scrolled out), a silent session still falls back to waiting.
+            $busy = $last -and (($now - $last).TotalSeconds -lt 90)
             $ptools = if ($pend.ContainsKey($id)) { $pend[$id] } else { @() }
             $state =
                 if ($ptools.Count) { if ($ptools -contains 'AskUserQuestion') { 'ask' } else { 'permission' } }
-                else { switch ([string]$script:cwState[$id]) { 'running' { 'running' } 'initializing' { 'running' } default { 'waiting' } } }
+                elseif ($script:cwTurn[$id] -and $busy) { 'running' }
+                else { 'waiting' }
             $upd = if ($last) { [DateTimeOffset]::new($last).ToUnixTimeMilliseconds() } else { 0 }
             $out[$id] = [pscustomobject]@{
                 sid = $id; project = ''; cwd = ''; title = [string]$script:cwTitle[$id]; group = ''
                 state = $state; message = ''; transcriptPath = ''
-                live = [bool]$recent; updatedAt = $upd
+                live = [bool]$live; updatedAt = $upd
             }
         }
     } catch { }
