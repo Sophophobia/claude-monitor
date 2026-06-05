@@ -114,6 +114,7 @@ and it stays unpinned; a later manual drag to another group is never overridden.
 - **Move:** drag the title bar. Position is remembered.
 - **Theme:** click the menu (≡) → **Switch to light/dark theme**. Dark by default; the choice is remembered.
 - **Compact mode:** click ▴ in the title bar to collapse the panel to a single line: one status dot per session (colored by state, hover to name it) plus the top session needing your **answer**/**permission** (permission first) and a count, or just the session count when all is calm. Clicking the line brings the Claude app to the front; use the ▾ arrow to expand.
+- **Update check:** on launch (and via the ≡ menu's *Check for updates*) the panel asks GitHub for the latest release. If a newer one exists, an amber dot appears in the title bar and the menu shows *Update available: vX.Y.Z* (click to open the release page). Turn it off by setting `updateCheck` to `false` in `config.json`.
 - **Close:** click ✕ (the panel only; hooks keep running and cost ~nothing).
 - **Autostart:** `install.ps1 -Startup`, or drop a shortcut to `start-panel.vbs`
   into the `shell:startup` folder. Remove that shortcut to disable.
@@ -254,6 +255,7 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
 - **移动：** 拖标题栏，位置会被记住。
 - **主题：** 点 ≡ 菜单 → **Switch to light/dark theme** 切换亮/暗主题。默认暗色，选择会被记住。
 - **超折叠模式：** 点标题栏的 ▴ 收成一行：每个会话一个状态点（按状态上色，hover 看名字），外加最需要处理的那条（**回答**/**权限**，permission 优先）+ 总数；都没事时显示会话总数。点这一行会把 Claude 提到前台；用 ▾ 箭头展开。
+- **更新检查：** 启动时（以及 ≡ 菜单里的 *Check for updates*）会联网问 GitHub 最新 release。有新版时标题栏出现一个琥珀色小点、菜单里出现 *Update available: vX.Y.Z*（点开发布页）。在 `config.json` 里把 `updateCheck` 设为 `false` 可关闭。
 - **关闭：** 点 ✕（只关面板；hooks 继续跑，几乎不耗资源）。
 - **开机自启：** `install.ps1 -Startup`，或把 `start-panel.vbs` 的快捷方式放进 `shell:startup` 文件夹。删掉那个快捷方式即可取消。
 

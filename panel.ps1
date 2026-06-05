@@ -122,6 +122,15 @@ $script:GroupCmd   = @{}
 $script:Theme = 'dark'   # 'dark' (default) or 'light'
 $script:Compact = $false # compact mode: show only sessions needing answer/permission
 
+# Update check: compare this build to the latest GitHub release (online, async).
+$script:Version     = 'v1.8.2'   # bump on every release
+$script:UpdateCheck = $true      # auto-check once at startup (config can disable)
+$script:ReleaseApi  = 'https://api.github.com/repos/Sophophobia/claude-monitor/releases/latest'
+$script:ReleaseUrl  = 'https://github.com/Sophophobia/claude-monitor/releases/latest'
+$script:UpdateTag   = $null      # latest tag, once a newer one is found
+$script:updHandle   = $null
+$script:updPS       = $null
+
 function Load-Config {
     try {
         if (Test-Path $ConfigPath) {
@@ -170,6 +179,7 @@ function Load-Config {
             }
             if ($c.theme) { $script:Theme = [string]$c.theme }
             if ($null -ne $c.compact) { $script:Compact = [bool]$c.compact }
+            if ($null -ne $c.updateCheck) { $script:UpdateCheck = [bool]$c.updateCheck }
         }
     } catch { }
 }
@@ -187,8 +197,9 @@ function Save-Config {
             collapsed  = $script:Collapsed
             autoPinned = $script:AutoPinned
             groupCmd   = $script:GroupCmd
-            theme      = $script:Theme
-            compact    = $script:Compact
+            theme       = $script:Theme
+            compact     = $script:Compact
+            updateCheck = $script:UpdateCheck
         }
         ($obj | ConvertTo-Json -Compress) | Set-Content -Path $ConfigPath -Encoding UTF8
     } catch { }
@@ -584,6 +595,50 @@ function Set-Compact($on) {
     Save-Config
     Refresh-Rows -force
 }
+
+# --------------------------------------------------------- update check ----
+# True if release tag $a is newer than $b (both like "v1.7.0").
+function Test-Newer($a, $b) {
+    try { return ([version](([string]$a) -replace '^v', '')) -gt ([version](([string]$b) -replace '^v', '')) }
+    catch { return $false }
+}
+
+# Start an async GitHub "latest release" fetch on its own runspace, so the UI
+# never blocks and offline/timeout just fails silently.
+function Start-UpdateCheck {
+    if ($script:updHandle) { return }   # one in flight already
+    try {
+        $script:updPS = [powershell]::Create()
+        [void]$script:updPS.AddScript({
+            param($api)
+            try {
+                [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+                $r = Invoke-RestMethod -Uri $api -Headers @{ 'User-Agent' = 'claude-monitor' } -TimeoutSec 6
+                return [string]$r.tag_name
+            } catch { return '' }
+        }).AddArgument($script:ReleaseApi)
+        $script:updHandle = $script:updPS.BeginInvoke()
+    } catch { $script:updHandle = $null }
+}
+
+# Poll the async fetch (called from the refresh timer). When done, compare and,
+# if newer, light the title-bar dot.
+function Poll-UpdateCheck {
+    if (-not $script:updHandle -or -not $script:updHandle.IsCompleted) { return }
+    $tag = ''
+    try { $tag = [string](@($script:updPS.EndInvoke($script:updHandle)) | Select-Object -Last 1) } catch { }
+    try { $script:updPS.Dispose() } catch { }
+    $script:updHandle = $null; $script:updPS = $null
+    if ($tag -and (Test-Newer $tag $script:Version)) {
+        $script:UpdateTag = $tag
+        if ($updDot) {
+            $updDot.Visible = $true
+            $script:tip.SetToolTip($updDot, "Update available: $tag (click to open)")
+        }
+    }
+}
+
+function Open-Release { try { Start-Process $script:ReleaseUrl } catch { } }
 $cBg = $cBar = $cText = $cDim = $null   # filled by Set-ThemeColors after Load-Config
 $fName   = New-Object System.Drawing.Font('Segoe UI', 9,  [System.Drawing.FontStyle]::Bold)
 $fState  = New-Object System.Drawing.Font('Segoe UI', 8.5)
@@ -641,6 +696,21 @@ $title.Location  = New-Object System.Drawing.Point(10, 0)
 $title.Size      = New-Object System.Drawing.Size(($W - 96), $TitleH)
 $title.TextAlign = 'MiddleLeft'
 $bar.Controls.Add($title)
+
+# Update-available indicator (hidden until a newer release is found).
+$updDot = New-Object System.Windows.Forms.Label
+$updDot.Text      = [char]0x25CF
+$updDot.ForeColor = [System.Drawing.Color]::FromArgb(234,179,8)   # amber-gold
+$updDot.Font      = $fState
+$updDot.AutoSize  = $false
+$updDot.Size      = New-Object System.Drawing.Size(16, $TitleH)
+$updDot.Location  = New-Object System.Drawing.Point(($W - 104), 0)
+$updDot.TextAlign = 'MiddleCenter'
+$updDot.Cursor    = 'Hand'
+$updDot.Visible   = $false
+$bar.Controls.Add($updDot)
+$updDot.BringToFront()
+$updDot.Add_Click({ Open-Release })
 
 # Compact-mode toggle (shows only sessions that need you).
 $btnCompact = New-Object System.Windows.Forms.Label
@@ -1067,6 +1137,16 @@ $btnMenu.Add_Click({
         Apply-Theme
     })
     [void]$menu.Items.Add($themeItem)
+    [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+    if ($script:UpdateTag) {
+        $miUpd = New-Object System.Windows.Forms.ToolStripMenuItem("Update available: $($script:UpdateTag)  (open)")
+        $miUpd.ForeColor = [System.Drawing.Color]::FromArgb(234,179,8)
+        $miUpd.Add_Click({ Open-Release })
+        [void]$menu.Items.Add($miUpd)
+    }
+    $miChk = New-Object System.Windows.Forms.ToolStripMenuItem(("Check for updates  (" + $script:Version + ")"))
+    $miChk.Add_Click({ Start-UpdateCheck })
+    [void]$menu.Items.Add($miChk)
     $quit = New-Object System.Windows.Forms.ToolStripMenuItem('Close panel')
     $quit.Add_Click({ $form.Close() })
     [void]$menu.Items.Add($quit)
@@ -1460,10 +1540,13 @@ function Refresh-Rows {
 # ----------------------------------------------------------- refresh timer --
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 1500
-$timer.Add_Tick({ Refresh-Rows })
+$timer.Add_Tick({ Refresh-Rows; Poll-UpdateCheck })
 $timer.Start()
 
-$form.Add_Shown({ Refresh-Rows -force })
+$form.Add_Shown({
+    Refresh-Rows -force
+    if ($script:UpdateCheck) { Start-UpdateCheck }
+})
 $form.Add_FormClosing({
     $script:PosX = $form.Location.X
     $script:PosY = $form.Location.Y
