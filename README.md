@@ -166,7 +166,9 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
   (`%APPDATA%\Claude\logs\main.log`) to surface Cowork state (running / needs
   permission / needs answer) and titles. This relies on the app's log format, so
   it's best-effort — if a future app update changes the log, only Cowork tracking
-  is affected (Code keeps working).
+  is affected (Code keeps working). A Cowork session never shows `Ended` on its
+  own (there's no reliable "deleted" signal in the log): an idle one stays green
+  `Waiting` and turns blue when it works again — clear it by unpinning.
 - Windows only (PowerShell + WinForms).
 
 ## License
@@ -282,7 +284,7 @@ Claude Code 会话 --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<id
 - `Needs permission` 是时序启发式（见上表），所以弹窗后约 3 秒才变橙，你一批准/拒绝就清掉（`PostToolUse` → `Running`）；其间长工具也会显示橙色。
 - pin 的会话结束后显示 `Ended`，并**保持 pin 不会被自动移除**；用菜单 → “Unpin ended sessions” 或右键 → Unpin 清理。桌面 App 有时给 hook 的 `session_id` 跟 `~/.claude/sessions/<pid>.json` 里的不一致，面板会用 `cwd` 匹配把这类会话救回判为存活，避免被误判成 `Ended`。
 - **挂着 ≠ 结束。** 桌面 App 在你只是把对话晾在一边/切到后台时也会触发 `SessionEnd`，不只是删除时才触发。所以 `Ended` 是靠对话的 **transcript 文件**（`~/.claude/projects/**/<id>.jsonl`）是否还在判断的：挂着的对话 transcript 还在，会一直显示 `Waiting`；只有删掉对话、transcript 没了，这一行才会变成 `Ended`。
-- **Cowork 会话**会和 Claude Code 会话一起出现在列表里（外观一致，可 pin、可分组）。Code 靠 hooks 跟踪；Cowork 跑在隔离的 VM 里，所以面板改读 Claude 桌面 App 的日志（`%APPDATA%\Claude\logs\main.log`）来显示 Cowork 的状态（运行中 / 等权限 / 等回答）和标题。这依赖 App 的日志格式，属尽力而为——将来 App 改了日志，也只影响 Cowork 跟踪，Code 照常工作。
+- **Cowork 会话**会和 Claude Code 会话一起出现在列表里（外观一致，可 pin、可分组）。Code 靠 hooks 跟踪；Cowork 跑在隔离的 VM 里，所以面板改读 Claude 桌面 App 的日志（`%APPDATA%\Claude\logs\main.log`）来显示 Cowork 的状态（运行中 / 等权限 / 等回答）和标题。这依赖 App 的日志格式，属尽力而为——将来 App 改了日志，也只影响 Cowork 跟踪，Code 照常工作。Cowork 会话**不会自己变成 `Ended`**（日志里没有可靠的"已删除"信号）：闲置时一直是绿色 `Waiting`，再次工作就变蓝，要清理就手动 unpin。
 - 仅支持 Windows（PowerShell + WinForms）。
 
 ## 许可证

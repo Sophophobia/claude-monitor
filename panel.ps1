@@ -311,9 +311,11 @@ function Get-CoworkSessions {
             if ($p -and $p.id) { if (-not $pend.ContainsKey($p.id)) { $pend[$p.id] = @() }; $pend[$p.id] += $p.tool }
         }
         foreach ($id in @($script:cwIsAgent.Keys)) {
-            $last   = $script:cwLast[$id]
-            $live   = $last -and (($now - $last).TotalMinutes -lt $staleMin)
-            if (-not $live -and ($script:Pins -notcontains $id)) { continue }   # don't flood the menu with old sessions
+            $last     = $script:cwLast[$id]
+            # Recency only decides what to LIST in the menu (so we don't flood it
+            # with old conversations). A pinned session is always kept.
+            $inWindow = $last -and (($now - $last).TotalMinutes -lt $staleMin)
+            if (-not $inWindow -and ($script:Pins -notcontains $id)) { continue }
             # "Working" = a turn is flagged active AND there was log activity in the
             # last ~90s. The activity gate is a safety net: if an end event was
             # missed (scrolled out), a silent session still falls back to waiting.
@@ -324,10 +326,15 @@ function Get-CoworkSessions {
                 elseif ($script:cwTurn[$id] -and $busy) { 'running' }
                 else { 'waiting' }
             $upd = if ($last) { [DateTimeOffset]::new($last).ToUnixTimeMilliseconds() } else { 0 }
+            # Never mark a Cowork session "Ended" just because it's idle: there is
+            # no reliable deletion signal in the log, so an idle conversation stays
+            # green "Waiting" (and turns blue when it works again). Clear it by
+            # unpinning. Otherwise an overnight-idle session would wrongly go gray
+            # and then be stuck (the not-live style overrides the real state).
             $out[$id] = [pscustomobject]@{
                 sid = $id; project = ''; cwd = ''; title = [string]$script:cwTitle[$id]; group = ''
                 state = $state; message = ''; transcriptPath = ''
-                live = [bool]$live; updatedAt = $upd
+                live = $true; updatedAt = $upd
             }
         }
     } catch { }
