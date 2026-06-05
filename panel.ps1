@@ -272,7 +272,7 @@ function Update-LogState {
             elseif ($l -match '(?:LocalAgentModeSessions\.sendMessage: sessionId=|Starting local session )(local_[0-9a-f\-]+)') {
                 $script:cwTurn[$matches[1]] = $true
             }
-            elseif ($l -match '\[Lifecycle\] Session (local_[0-9a-f\-]+): .+ (?:→|->) (\w+)') {
+            elseif ($l -match '\[Lifecycle\] Session (local_[0-9a-f\-]+): .+ (?:\u2192|->) (\w+)') {
                 $to = $matches[2]
                 if ($to -eq 'running' -or $to -eq 'initializing') { $script:cwTurn[$matches[1]] = $true }
                 elseif ($to -eq 'idle' -or $to -eq 'stopping') { $script:cwTurn[$matches[1]] = $false }
