@@ -123,13 +123,21 @@ $script:Theme = 'dark'   # 'dark' (default) or 'light'
 $script:Compact = $false # compact mode: show only sessions needing answer/permission
 
 # Update check: compare this build to the latest GitHub release (online, async).
-$script:Version     = 'v1.8.2'   # bump on every release
+$script:Version     = 'v1.8.3'   # bump on every release
 $script:UpdateCheck = $true      # auto-check once at startup (config can disable)
 $script:ReleaseApi  = 'https://api.github.com/repos/Sophophobia/claude-monitor/releases/latest'
 $script:ReleaseUrl  = 'https://github.com/Sophophobia/claude-monitor/releases/latest'
 $script:UpdateTag   = $null      # latest tag, once a newer one is found
 $script:updHandle   = $null
 $script:updPS       = $null
+
+# Auto-reload: watch this script file; when it changes (an update / git pull),
+# relaunch a fresh instance and close this one, so updates apply without a
+# manual restart.
+$script:AutoReload  = $true
+$script:SelfPath    = $PSCommandPath
+$script:SelfMTime   = $null
+try { if ($script:SelfPath) { $script:SelfMTime = (Get-Item $script:SelfPath).LastWriteTimeUtc } } catch { }
 
 function Load-Config {
     try {
@@ -180,6 +188,7 @@ function Load-Config {
             if ($c.theme) { $script:Theme = [string]$c.theme }
             if ($null -ne $c.compact) { $script:Compact = [bool]$c.compact }
             if ($null -ne $c.updateCheck) { $script:UpdateCheck = [bool]$c.updateCheck }
+            if ($null -ne $c.autoReload) { $script:AutoReload = [bool]$c.autoReload }
         }
     } catch { }
 }
@@ -200,6 +209,7 @@ function Save-Config {
             theme       = $script:Theme
             compact     = $script:Compact
             updateCheck = $script:UpdateCheck
+            autoReload  = $script:AutoReload
         }
         ($obj | ConvertTo-Json -Compress) | Set-Content -Path $ConfigPath -Encoding UTF8
     } catch { }
@@ -639,6 +649,31 @@ function Poll-UpdateCheck {
 }
 
 function Open-Release { try { Start-Process $script:ReleaseUrl } catch { } }
+
+# Auto-reload: if panel.ps1 changed on disk (update / git pull), relaunch a fresh
+# instance and close this one. Debounced (file must be stable a few seconds, so
+# we don't reload mid-edit) and parse-checked (don't reload into a broken file).
+function Check-SelfReload {
+    if (-not $script:AutoReload -or -not $script:SelfPath -or -not $script:SelfMTime) { return }
+    try {
+        $fi = Get-Item $script:SelfPath -ErrorAction Stop
+        if ($fi.LastWriteTimeUtc -le $script:SelfMTime) { return }              # unchanged
+        if (((Get-Date).ToUniversalTime() - $fi.LastWriteTimeUtc).TotalSeconds -lt 3) { return }  # still settling
+        $errs = $null
+        [void][System.Management.Automation.PSParser]::Tokenize((Get-Content $script:SelfPath -Raw), [ref]$errs)
+        if ($errs.Count -gt 0) { $script:SelfMTime = $fi.LastWriteTimeUtc; return }   # broken: skip, wait for a good version
+        $script:SelfMTime = $fi.LastWriteTimeUtc
+        Save-Config
+        $vbs = Join-Path (Split-Path $script:SelfPath) 'start-panel.vbs'
+        if (Test-Path $vbs) {
+            Start-Process wscript.exe -ArgumentList ('"' + $vbs + '"')
+        } else {
+            Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Sta','-WindowStyle','Hidden','-File',('"' + $script:SelfPath + '"')
+        }
+        $form.Close()
+    } catch { }
+}
+
 $cBg = $cBar = $cText = $cDim = $null   # filled by Set-ThemeColors after Load-Config
 $fName   = New-Object System.Drawing.Font('Segoe UI', 9,  [System.Drawing.FontStyle]::Bold)
 $fState  = New-Object System.Drawing.Font('Segoe UI', 8.5)
@@ -1540,7 +1575,7 @@ function Refresh-Rows {
 # ----------------------------------------------------------- refresh timer --
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 1500
-$timer.Add_Tick({ Refresh-Rows; Poll-UpdateCheck })
+$timer.Add_Tick({ Refresh-Rows; Poll-UpdateCheck; Check-SelfReload })
 $timer.Start()
 
 $form.Add_Shown({
