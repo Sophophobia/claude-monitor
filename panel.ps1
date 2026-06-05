@@ -221,6 +221,97 @@ function Test-TranscriptAlive($sid, $tpath) {
     return $false
 }
 
+# ---------------------------------------------- Cowork (agent-mode) source --
+# Code sessions are tracked via hooks (status files). Cowork ("agent mode")
+# sessions run inside an isolated VM, so their hooks never reach this machine --
+# but the desktop app logs their lifecycle/permissions on the host in
+# %APPDATA%\Claude\logs\main.log. We tail that log to surface Cowork sessions in
+# the same list (no visual difference). This relies on the app's log text format,
+# so it is best-effort and wrapped so any failure simply yields no Cowork rows.
+$script:LogPath    = Join-Path $env:APPDATA 'Claude\logs\main.log'
+$script:LogPos     = $null            # byte offset parsed so far (incremental tail)
+$script:cwIsAgent  = @{}              # local_id -> $true if it is an agent-mode (Cowork) session
+$script:cwTitle    = @{}              # local_id -> app conversation title
+$script:cwState    = @{}              # local_id -> last lifecycle state
+$script:cwLast     = @{}              # local_id -> [datetime] last activity
+$script:cwOpenPerm = @{}              # requestId -> @{ id=local_id; tool=toolName }
+
+function Update-LogState {
+    try {
+        if (-not (Test-Path $script:LogPath)) { return }
+        $fs = New-Object System.IO.FileStream($script:LogPath, 'Open', 'Read', 'ReadWrite')
+        try {
+            $len = $fs.Length
+            if ($null -eq $script:LogPos) { $script:LogPos = [Math]::Max(0, $len - 3MB) }  # seed from tail
+            elseif ($len -lt $script:LogPos) { $script:LogPos = 0 }                          # rotated/truncated
+            if ($len -le $script:LogPos) { return }
+            [void]$fs.Seek($script:LogPos, 'Begin')
+            $sr = New-Object System.IO.StreamReader($fs, [System.Text.Encoding]::UTF8)
+            $chunk = $sr.ReadToEnd()
+            $script:LogPos = $len
+        } finally { $fs.Close() }
+
+        foreach ($l in ($chunk -split "`r?`n")) {
+            if (-not $l) { continue }
+            $ts = $null
+            if ($l -match '^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)') {
+                try { $ts = [datetime]::ParseExact($matches[1], 'yyyy-MM-dd HH:mm:ss', $null) } catch { }
+            }
+            # Classify a session as agent-mode (Cowork) when the agent-mode manager
+            # or its on-disk session folder references it.
+            if (($l -match 'LocalAgentModeSession' -or $l -match 'local-agent-mode-sessions') -and $l -match '(local_[0-9a-f\-]+)') {
+                $script:cwIsAgent[$matches[1]] = $true
+                if ($ts) { $script:cwLast[$matches[1]] = $ts }
+            }
+            if ($l -match "Updated session (local_[0-9a-f\-]+): \{ title: '(.*?)', titleSource:") {
+                $script:cwTitle[$matches[1]] = $matches[2]; if ($ts) { $script:cwLast[$matches[1]] = $ts }
+            }
+            elseif ($l -match '\[Lifecycle\] Session (local_[0-9a-f\-]+): .+ (?:→|->) (\w+)') {
+                $script:cwState[$matches[1]] = $matches[2]; if ($ts) { $script:cwLast[$matches[1]] = $ts }
+            }
+            elseif ($l -match 'Emitted tool permission request ([0-9a-f\-]+) for (\S+) in session (local_[0-9a-f\-]+)') {
+                $script:cwOpenPerm[$matches[1]] = @{ id = $matches[3]; tool = $matches[2] }
+                if ($ts) { $script:cwLast[$matches[3]] = $ts }
+            }
+            elseif ($l -match 'Received permission response for ([0-9a-f\-]+)') {
+                [void]$script:cwOpenPerm.Remove($matches[1])
+            }
+        }
+    } catch { }
+}
+
+# Build session rows for currently-open Cowork sessions, shaped exactly like the
+# hook-derived rows so they render identically.
+function Get-CoworkSessions {
+    $out = @{}
+    try {
+        Update-LogState
+        $now = [datetime]::Now
+        $staleMin = 360   # 6h: parity with the code-session staleness window
+        $pend = @{}
+        foreach ($rid in @($script:cwOpenPerm.Keys)) {
+            $p = $script:cwOpenPerm[$rid]
+            if ($p -and $p.id) { if (-not $pend.ContainsKey($p.id)) { $pend[$p.id] = @() }; $pend[$p.id] += $p.tool }
+        }
+        foreach ($id in @($script:cwIsAgent.Keys)) {
+            $last   = $script:cwLast[$id]
+            $recent = $last -and (($now - $last).TotalMinutes -lt $staleMin)
+            if (-not $recent -and ($script:Pins -notcontains $id)) { continue }   # don't flood the menu with old sessions
+            $ptools = if ($pend.ContainsKey($id)) { $pend[$id] } else { @() }
+            $state =
+                if ($ptools.Count) { if ($ptools -contains 'AskUserQuestion') { 'ask' } else { 'permission' } }
+                else { switch ([string]$script:cwState[$id]) { 'running' { 'running' } 'initializing' { 'running' } default { 'waiting' } } }
+            $upd = if ($last) { [DateTimeOffset]::new($last).ToUnixTimeMilliseconds() } else { 0 }
+            $out[$id] = [pscustomobject]@{
+                sid = $id; project = ''; cwd = ''; title = [string]$script:cwTitle[$id]; group = ''
+                state = $state; message = ''; transcriptPath = ''
+                live = [bool]$recent; updatedAt = $upd
+            }
+        }
+    } catch { }
+    return $out
+}
+
 # ----------------------------------------------------- data acquisition -----
 # Returns hashtable: sessionId -> [pscustomobject]@{ sid, project, cwd, state, message, live, updatedAt }
 function Get-Sessions {
@@ -323,6 +414,14 @@ function Get-Sessions {
                 $e.state = 'running'
             }
         }
+    }
+
+    # Merge in Cowork (agent-mode) sessions from the desktop app log. They are
+    # keyed by their stable local_ id; code sessions use the CLI session id, so
+    # the two id namespaces never collide. Only add ones not already present.
+    $cw = Get-CoworkSessions
+    foreach ($id in @($cw.Keys)) {
+        if (-not $map.ContainsKey($id)) { $map[$id] = $cw[$id] }
     }
 
     return $map
