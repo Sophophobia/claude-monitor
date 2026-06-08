@@ -171,6 +171,14 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
   is affected (Code keeps working). A Cowork session never shows `Ended` on its
   own (there's no reliable "deleted" signal in the log): an idle one stays green
   `Waiting` and turns blue when it works again — clear it by unpinning.
+- **Cowork tracking requires that host log to exist.** It only works if the
+  Claude desktop app on this machine actually writes `%APPDATA%\Claude\logs\main.log`
+  (or a sibling `Claude*\logs\main.log`) with the agent-mode lifecycle lines. On
+  some setups that log isn't produced on the host (the Cowork run-log stays inside
+  the isolated VM), in which case **no Cowork sessions will appear and there's
+  nothing to point the panel at** — Code/CLI sessions are unaffected. To check
+  your machine, run in PowerShell:
+  `Get-ChildItem "$env:APPDATA","$env:LOCALAPPDATA" -Recurse -Filter main.log -Depth 3 -ErrorAction SilentlyContinue | ? FullName -like '*Claude*'`
 - Windows only (PowerShell + WinForms).
 
 ## License
