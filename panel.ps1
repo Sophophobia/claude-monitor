@@ -16,6 +16,16 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
+# Single instance: keep only the newest. Close any other running instance of THIS
+# panel script, so re-launching (or an auto-reload) never stacks duplicate panels.
+try {
+    if ($PSCommandPath) {
+        Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction Stop |
+            Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine.Contains($PSCommandPath) } |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    }
+} catch { }
+
 # Win32 helper to bring the Claude desktop app window to the foreground when a
 # session row is clicked. Windows normally blocks a background process from
 # stealing focus, so we briefly attach to the current foreground thread's input
