@@ -260,7 +260,10 @@ $script:cwOpenPerm = @{}              # requestId -> @{ id=local_id; tool=toolNa
 
 function Update-LogState {
     try {
-        if (-not (Test-Path $script:LogPath)) { return }
+        # Open directly (no Test-Path gate): Test-Path was observed to return
+        # False for this log in some panel processes even though the file exists
+        # and is readable with a shared handle. Let the open throw if it truly is
+        # absent; the outer catch handles it.
         $fs = New-Object System.IO.FileStream($script:LogPath, 'Open', 'Read', 'ReadWrite')
         try {
             $len = $fs.Length
