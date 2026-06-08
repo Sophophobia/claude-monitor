@@ -366,6 +366,18 @@ function Get-CoworkSessions {
                 live = $true; updatedAt = $upd
             }
         }
+    } catch {
+        try {
+            $mk = Join-Path $env:USERPROFILE '.claude\session-status\_cwdebug.on'
+            if (Test-Path $mk) { Set-Content -Path (Join-Path $env:USERPROFILE '.claude\session-status\_cwdebug.log') -Value ("EXC pid=$PID : " + $_.Exception.Message + " @ " + $_.InvocationInfo.ScriptLineNumber) -Encoding UTF8 }
+        } catch { }
+    }
+    try {
+        $mk = Join-Path $env:USERPROFILE '.claude\session-status\_cwdebug.on'
+        if (Test-Path $mk) {
+            $line = '{0} pid={1} logExists={2} pos={3} isAgent={4} cwLast={5} out={6} pins={7}' -f (Get-Date -Format 'HH:mm:ss'), $PID, (Test-Path $script:LogPath), $script:LogPos, $script:cwIsAgent.Count, $script:cwLast.Count, $out.Count, (@($script:Pins).Count)
+            Set-Content -Path (Join-Path $env:USERPROFILE '.claude\session-status\_cwdebug.log') -Value $line -Encoding UTF8
+        }
     } catch { }
     return $out
 }
