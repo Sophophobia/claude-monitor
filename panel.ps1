@@ -251,6 +251,7 @@ function Test-TranscriptAlive($sid, $tpath) {
 # so it is best-effort and wrapped so any failure simply yields no Cowork rows.
 $script:LogPath    = Join-Path $env:APPDATA 'Claude\logs\main.log'
 $script:LogPos     = $null            # byte offset parsed so far (incremental tail)
+$script:LogFullAt  = $null            # last time we re-scanned the tail (self-heal)
 $script:cwIsAgent  = @{}              # local_id -> $true if it is an agent-mode (Cowork) session
 $script:cwTitle    = @{}              # local_id -> app conversation title
 $script:cwTurn     = @{}              # local_id -> $true if a turn is currently in progress
@@ -263,8 +264,15 @@ function Update-LogState {
         $fs = New-Object System.IO.FileStream($script:LogPath, 'Open', 'Read', 'ReadWrite')
         try {
             $len = $fs.Length
-            if ($null -eq $script:LogPos) { $script:LogPos = [Math]::Max(0, $len - 3MB) }  # seed from tail
-            elseif ($len -lt $script:LogPos) { $script:LogPos = 0 }                          # rotated/truncated
+            $nowT = Get-Date
+            # Re-scan the recent tail on first run and every 30s, so a session whose
+            # one-off classification line we missed still gets picked up. State is
+            # recomputed idempotently from the last 3MB, so re-reading is harmless.
+            if ($null -eq $script:LogFullAt -or ($nowT - $script:LogFullAt).TotalSeconds -ge 30) {
+                $script:LogPos = [Math]::Max(0, $len - 3MB)
+                $script:LogFullAt = $nowT
+            }
+            elseif ($len -lt $script:LogPos) { $script:LogPos = 0 }   # rotated/truncated
             if ($len -le $script:LogPos) { return }
             [void]$fs.Seek($script:LogPos, 'Begin')
             $sr = New-Object System.IO.StreamReader($fs, [System.Text.Encoding]::UTF8)
