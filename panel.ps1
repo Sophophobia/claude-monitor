@@ -375,7 +375,7 @@ function Get-CoworkSessions {
     try {
         $mk = Join-Path $env:USERPROFILE '.claude\session-status\_cwdebug.on'
         if (Test-Path $mk) {
-            $line = '{0} pid={1} logExists={2} pos={3} isAgent={4} cwLast={5} out={6} pins={7}' -f (Get-Date -Format 'HH:mm:ss'), $PID, (Test-Path $script:LogPath), $script:LogPos, $script:cwIsAgent.Count, $script:cwLast.Count, $out.Count, (@($script:Pins).Count)
+            $line = '{0} pid={1} logExists={2} out={3} isAgent={4} APPDATA=[{5}] LogPath=[{6}]' -f (Get-Date -Format 'HH:mm:ss'), $PID, (Test-Path $script:LogPath), $out.Count, $script:cwIsAgent.Count, $env:APPDATA, $script:LogPath
             Set-Content -Path (Join-Path $env:USERPROFILE '.claude\session-status\_cwdebug.log') -Value $line -Encoding UTF8
         }
     } catch { }
