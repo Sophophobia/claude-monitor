@@ -248,7 +248,7 @@ $script:trayLastColor = $null     # ARGB of the last-drawn dot (skip redraw if u
 $script:trueExit     = $false     # set before a genuine quit so FormClosing doesn't hide-to-tray
 
 # Update check: compare this build to the latest GitHub release (online, async).
-$script:Version     = 'v1.8.3'   # bump on every release
+$script:Version     = 'v1.9.0'   # bump on every release
 $script:UpdateCheck = $true      # auto-check once at startup (config can disable)
 $script:ReleaseApi  = 'https://api.github.com/repos/Sophophobia/claude-monitor/releases/latest'
 $script:ReleaseUrl  = 'https://github.com/Sophophobia/claude-monitor/releases/latest'
