@@ -67,6 +67,112 @@ function Focus-Claude {
     } catch { }
 }
 
+# Free a HICON created by Bitmap.GetHicon() so the tray icon doesn't leak handles.
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class IconUtil { [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr h); }
+"@
+
+# Bring the panel back into view (used by the tray icon / its menu).
+function Show-Panel {
+    try {
+        $form.Show()
+        $form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
+        $form.TopMost = $true
+        [void]$form.Activate()
+        $form.BringToFront()
+    } catch { }
+}
+
+# Paint the tray icon as a colored status dot + set its tooltip. Only redraws
+# when the color actually changes (and frees the previous HICON).
+function Set-TrayDot($color, $tip) {
+    if (-not $script:trayIcon) { return }
+    try {
+        if ($tip) { if ($tip.Length -gt 63) { $tip = $tip.Substring(0, 63) }; $script:trayIcon.Text = $tip }
+        if ($script:trayLastColor -eq $color.ToArgb()) { return }
+        $script:trayLastColor = $color.ToArgb()
+        $bmp = New-Object System.Drawing.Bitmap(16, 16)
+        $g = [System.Drawing.Graphics]::FromImage($bmp)
+        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $g.Clear([System.Drawing.Color]::Transparent)
+        $br = New-Object System.Drawing.SolidBrush($color)
+        $g.FillEllipse($br, 1, 1, 14, 14)
+        $br.Dispose(); $g.Dispose()
+        $hicon = $bmp.GetHicon()
+        $script:trayIcon.Icon = [System.Drawing.Icon]::FromHandle($hicon)
+        if ($script:trayHicon -ne [IntPtr]::Zero) { [void][IconUtil]::DestroyIcon($script:trayHicon) }
+        $script:trayHicon = $hicon
+        $bmp.Dispose()
+    } catch { }
+}
+
+# Recompute the tray icon/tooltip from the aggregate state of pinned sessions.
+# Priority: needs permission (orange) > needs answer (purple) > running (blue) >
+# waiting (green) > nothing (gray).
+function Update-Tray($all) {
+    if (-not $script:trayIcon) { return }
+    try {
+        $c = @{ permission = 0; ask = 0; running = 0; waiting = 0; ended = 0 }
+        foreach ($sid in @($script:Pins)) {
+            $s = Resolve-Pin $sid $all
+            if (-not $s.live) { $c.ended++ }
+            elseif ($s.state -eq 'permission') { $c.permission++ }
+            elseif ($s.state -eq 'ask') { $c.ask++ }
+            elseif ($s.state -eq 'running' -or $s.state -eq 'pending') { $c.running++ }
+            else { $c.waiting++ }
+        }
+        $color =
+            if ($c.permission) { [System.Drawing.Color]::FromArgb(249, 115, 22) }
+            elseif ($c.ask)    { [System.Drawing.Color]::FromArgb(168, 85, 247) }
+            elseif ($c.running){ [System.Drawing.Color]::FromArgb(59, 130, 246) }
+            elseif ($c.waiting){ [System.Drawing.Color]::FromArgb(34, 197, 94) }
+            else               { [System.Drawing.Color]::FromArgb(107, 114, 128) }
+        $parts = @()
+        if ($c.permission) { $parts += "$($c.permission) needs permission" }
+        if ($c.ask)        { $parts += "$($c.ask) needs answer" }
+        if ($c.running)    { $parts += "$($c.running) running" }
+        if ($c.waiting)    { $parts += "$($c.waiting) waiting" }
+        $tip = if ($parts.Count) { 'Claude Monitor - ' + ($parts -join ', ') } else { 'Claude Monitor' }
+        Set-TrayDot $color $tip
+    } catch { }
+}
+
+# Turn the tray icon on/off (and persist the choice).
+function Set-Tray($on) {
+    $script:Tray = [bool]$on
+    if ($script:Tray) {
+        if (-not $script:trayIcon) {
+            $script:trayIcon = New-Object System.Windows.Forms.NotifyIcon
+            $script:trayIcon.Text = 'Claude Monitor'
+            $menu = New-Object System.Windows.Forms.ContextMenuStrip
+            $miShow = New-Object System.Windows.Forms.ToolStripMenuItem('Show panel')
+            $miShow.Add_Click({ Show-Panel })
+            [void]$menu.Items.Add($miShow)
+            $miExit = New-Object System.Windows.Forms.ToolStripMenuItem('Exit')
+            $miExit.Add_Click({ $script:trueExit = $true; $form.Close() })
+            [void]$menu.Items.Add($miExit)
+            $script:trayIcon.ContextMenuStrip = $menu
+            # Left-click summons the panel (right-click shows the menu).
+            $script:trayIcon.Add_MouseClick({ param($s, $e) if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { Show-Panel } })
+            $script:trayLastColor = $null
+            Set-TrayDot ([System.Drawing.Color]::FromArgb(107, 114, 128)) 'Claude Monitor'
+        }
+        $script:trayIcon.Visible = $true
+        Update-Tray (Get-Sessions)
+    } else {
+        if ($script:trayIcon) {
+            $script:trayIcon.Visible = $false
+            $script:trayIcon.Dispose()
+            $script:trayIcon = $null
+            if ($script:trayHicon -ne [IntPtr]::Zero) { [void][IconUtil]::DestroyIcon($script:trayHicon); $script:trayHicon = [IntPtr]::Zero }
+        }
+        Show-Panel   # don't leave the panel stranded hidden with no tray to summon it
+    }
+    Save-Config
+}
+
 # Custom color table so context menus match the theme: no white image-margin
 # gutter, and a hover highlight that keeps the (light or dark) text readable.
 # Colors are static fields set from the current theme before each menu shows.
@@ -131,6 +237,15 @@ $script:GroupCmd   = @{}
 
 $script:Theme = 'dark'   # 'dark' (default) or 'light'
 $script:Compact = $false # compact mode: show only sessions needing answer/permission
+
+# System-tray (notification area) icon. When on, a status-colored dot sits in the
+# tray; left-click summons the panel, and the ✕ button hides to tray instead of
+# quitting. Off by default.
+$script:Tray         = $false
+$script:trayIcon     = $null      # System.Windows.Forms.NotifyIcon
+$script:trayHicon    = [IntPtr]::Zero  # current HICON, freed when the icon changes
+$script:trayLastColor = $null     # ARGB of the last-drawn dot (skip redraw if unchanged)
+$script:trueExit     = $false     # set before a genuine quit so FormClosing doesn't hide-to-tray
 
 # Update check: compare this build to the latest GitHub release (online, async).
 $script:Version     = 'v1.8.3'   # bump on every release
@@ -197,6 +312,7 @@ function Load-Config {
             }
             if ($c.theme) { $script:Theme = [string]$c.theme }
             if ($null -ne $c.compact) { $script:Compact = [bool]$c.compact }
+            if ($null -ne $c.tray) { $script:Tray = [bool]$c.tray }
             if ($null -ne $c.updateCheck) { $script:UpdateCheck = [bool]$c.updateCheck }
             if ($null -ne $c.autoReload) { $script:AutoReload = [bool]$c.autoReload }
         }
@@ -218,6 +334,7 @@ function Save-Config {
             groupCmd   = $script:GroupCmd
             theme       = $script:Theme
             compact     = $script:Compact
+            tray        = $script:Tray
             updateCheck = $script:UpdateCheck
             autoReload  = $script:AutoReload
         }
@@ -691,6 +808,7 @@ function Check-SelfReload {
         } else {
             Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Sta','-WindowStyle','Hidden','-File',('"' + $script:SelfPath + '"')
         }
+        $script:trueExit = $true
         $form.Close()
     } catch { }
 }
@@ -800,7 +918,7 @@ $btnClose.Location  = New-Object System.Drawing.Point(($W - 28), 0)
 $btnClose.TextAlign = 'MiddleCenter'
 $btnClose.Cursor    = 'Hand'
 $bar.Controls.Add($btnClose)
-$btnClose.Add_Click({ $form.Close() })
+$btnClose.Add_Click({ if ($script:Tray) { $form.Hide() } else { $form.Close() } })
 $btnClose.Add_MouseEnter({ $btnClose.ForeColor = [System.Drawing.Color]::FromArgb(239,68,68) })
 $btnClose.Add_MouseLeave({ $btnClose.ForeColor = $cDim })
 
@@ -1193,6 +1311,10 @@ $btnMenu.Add_Click({
         Apply-Theme
     })
     [void]$menu.Items.Add($themeItem)
+    $trayItem = New-Object System.Windows.Forms.ToolStripMenuItem(
+        $(if ($script:Tray) { 'Hide tray icon' } else { 'Show tray icon' }))
+    $trayItem.Add_Click({ Set-Tray (-not $script:Tray) })
+    [void]$menu.Items.Add($trayItem)
     [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
     if ($script:UpdateTag) {
         $miUpd = New-Object System.Windows.Forms.ToolStripMenuItem("Update available: $($script:UpdateTag)  (open)")
@@ -1204,7 +1326,7 @@ $btnMenu.Add_Click({
     $miChk.Add_Click({ Start-UpdateCheck })
     [void]$menu.Items.Add($miChk)
     $quit = New-Object System.Windows.Forms.ToolStripMenuItem('Close panel')
-    $quit.Add_Click({ $form.Close() })
+    $quit.Add_Click({ $script:trueExit = $true; $form.Close() })
     [void]$menu.Items.Add($quit)
 
     $menu.Show($btnMenu, (New-Object System.Drawing.Point(0, $TitleH)))
@@ -1250,6 +1372,10 @@ function Refresh-Rows {
         }
     }
     if ($cfgChanged) { Normalize-Groups; Save-Config }
+
+    # Keep the tray dot/tooltip current (cheap: a handful of pins; redraw only on
+    # color change). Runs before the unchanged-signature early-returns below.
+    if ($script:trayIcon) { Update-Tray $all }
 
     # Compact mode: one line. A small status dot per pinned session (so you can
     # see they're all still here, colored by state) plus text: the top session
@@ -1600,14 +1726,24 @@ $timer.Add_Tick({ Refresh-Rows; Poll-UpdateCheck; Check-SelfReload })
 $timer.Start()
 
 $form.Add_Shown({
+    if ($script:Tray) { Set-Tray $true }
     Refresh-Rows -force
     if ($script:UpdateCheck) { Start-UpdateCheck }
 })
 $form.Add_FormClosing({
+    param($s, $e)
+    # With the tray icon on, the ✕ / a close request just hides to tray; only a
+    # genuine quit (tray Exit, menu Close panel, auto-reload) actually closes.
+    if ($script:Tray -and -not $script:trueExit) {
+        $e.Cancel = $true
+        $form.Hide()
+        return
+    }
     $script:PosX = $form.Location.X
     $script:PosY = $form.Location.Y
     Save-Config
     $timer.Stop()
+    if ($script:trayIcon) { $script:trayIcon.Visible = $false; $script:trayIcon.Dispose(); $script:trayIcon = $null }
 })
 
 [void][System.Windows.Forms.Application]::Run($form)
