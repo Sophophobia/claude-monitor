@@ -128,12 +128,13 @@ $script:UngroupedName = 'Ungrouped'   # header shown for sessions in no group (o
 # a fresh "#group" re-groups but a later manual move is not overridden.
 $script:AutoPinned = @{}
 $script:GroupCmd   = @{}
+$script:NameCmd    = @{}   # last "#name/#group command" stamp applied per sid (force re-pin latch)
 
 $script:Theme = 'dark'   # 'dark' (default) or 'light'
 $script:Compact = $false # compact mode: show only sessions needing answer/permission
 
 # Update check: compare this build to the latest GitHub release (online, async).
-$script:Version     = 'v1.8.3'   # bump on every release
+$script:Version     = 'v1.8.4'   # bump on every release
 $script:UpdateCheck = $true      # auto-check once at startup (config can disable)
 $script:ReleaseApi  = 'https://api.github.com/repos/Sophophobia/claude-monitor/releases/latest'
 $script:ReleaseUrl  = 'https://github.com/Sophophobia/claude-monitor/releases/latest'
@@ -195,6 +196,11 @@ function Load-Config {
                 foreach ($p in $c.groupCmd.PSObject.Properties) { $h[$p.Name] = [string]$p.Value }
                 $script:GroupCmd = $h
             }
+            if ($c.nameCmd) {
+                $h = @{}
+                foreach ($p in $c.nameCmd.PSObject.Properties) { $h[$p.Name] = [long]$p.Value }
+                $script:NameCmd = $h
+            }
             if ($c.theme) { $script:Theme = [string]$c.theme }
             if ($null -ne $c.compact) { $script:Compact = [bool]$c.compact }
             if ($null -ne $c.updateCheck) { $script:UpdateCheck = [bool]$c.updateCheck }
@@ -216,6 +222,7 @@ function Save-Config {
             collapsed  = $script:Collapsed
             autoPinned = $script:AutoPinned
             groupCmd   = $script:GroupCmd
+            nameCmd    = $script:NameCmd
             theme       = $script:Theme
             compact     = $script:Compact
             updateCheck = $script:UpdateCheck
@@ -374,7 +381,7 @@ function Get-CoworkSessions {
             # unpinning. Otherwise an overnight-idle session would wrongly go gray
             # and then be stuck (the not-live style overrides the real state).
             $out[$id] = [pscustomobject]@{
-                sid = $id; project = ''; cwd = ''; title = [string]$script:cwTitle[$id]; group = ''
+                sid = $id; project = ''; cwd = ''; title = [string]$script:cwTitle[$id]; group = ''; cmdAt = 0
                 state = $state; message = ''; transcriptPath = ''
                 live = $true; updatedAt = $upd
             }
@@ -408,6 +415,7 @@ function Get-Sessions {
                     cwd            = [string]$j.cwd
                     title          = ''
                     group          = ''
+                    cmdAt          = 0
                     state          = 'waiting'
                     message        = ''
                     transcriptPath = ''
@@ -445,6 +453,7 @@ function Get-Sessions {
                     if ($j.transcriptPath) { $map[$sid].transcriptPath = [string]$j.transcriptPath }
                     if ($j.title) { $map[$sid].title = [string]$j.title }
                     if ($j.group) { $map[$sid].group = [string]$j.group }
+                    if ($j.cmdAt) { $map[$sid].cmdAt = [long]$j.cmdAt }
                     if (-not $map[$sid].project -and $j.project) { $map[$sid].project = [string]$j.project }
                     if (-not $map[$sid].cwd -and $j.cwd) { $map[$sid].cwd = [string]$j.cwd }
                 } else {
@@ -461,6 +470,7 @@ function Get-Sessions {
                         cwd            = [string]$j.cwd
                         title          = [string]$j.title
                         group          = [string]$j.group
+                        cmdAt          = $(if ($j.cmdAt) { [long]$j.cmdAt } else { 0 })
                         state          = [string]$j.state
                         message        = [string]$j.message
                         transcriptPath = [string]$j.transcriptPath
@@ -539,6 +549,7 @@ function Resolve-Pin($sid, $all) {
         cwd            = if ($info) { [string]$info.cwd }     else { '' }
         title          = if ($info) { [string]$info.title }   else { '' }
         group          = ''
+        cmdAt          = 0
         transcriptPath = $tpath
         state          = if ($alive) { 'waiting' } else { 'ended' }
         message        = ''
@@ -1233,7 +1244,18 @@ function Refresh-Rows {
         $sv = $all[$k]
         if (-not $sv.live) { continue }
         if (-not $sv.title -and -not $sv.group) { continue }
-        if (($script:Pins -notcontains $k) -and (-not $script:AutoPinned.ContainsKey($k))) {
+        # A freshly issued #name/#group (a cmdAt we haven't applied yet) FORCE
+        # re-pins the session even if the user had unpinned it -- naming a session
+        # means you want it shown. Clearing GroupCmd makes its group re-apply too.
+        $fresh = ($sv.cmdAt -gt 0) -and ($script:NameCmd[$k] -ne $sv.cmdAt)
+        if ($fresh) {
+            $script:NameCmd[$k] = $sv.cmdAt
+            if ($script:AutoPinned.ContainsKey($k)) { $script:AutoPinned.Remove($k) }
+            if ($script:GroupCmd.ContainsKey($k)) { $script:GroupCmd.Remove($k) }
+            if ($script:Pins -notcontains $k) { $script:Pins = @($script:Pins) + $k }
+            $cfgChanged = $true
+        }
+        elseif (($script:Pins -notcontains $k) -and (-not $script:AutoPinned.ContainsKey($k))) {
             $script:Pins = @($script:Pins) + $k
             $script:AutoPinned[$k] = $true
             $cfgChanged = $true

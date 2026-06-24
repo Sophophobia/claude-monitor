@@ -64,11 +64,14 @@ try {
         exit 0
     }
 
-    # Preserve an existing custom label (set via "#name"), group, and prior state.
+    # Preserve an existing custom label (set via "#name"), group, prior state, and
+    # the last "#name/#group command" stamp (so the panel can tell a freshly
+    # issued command from a lingering title and re-pin even if it was unpinned).
     $title = ''
     $group = ''
     $prevState = ''
     $transcriptPath = ''
+    $cmdAt = 0
     if (Test-Path $file) {
         try {
             $prev = Get-Content $file -Raw -ErrorAction Stop | ConvertFrom-Json
@@ -76,6 +79,7 @@ try {
             if ($prev.group) { $group = [string]$prev.group }
             if ($prev.state) { $prevState = [string]$prev.state }
             if ($prev.transcriptPath) { $transcriptPath = [string]$prev.transcriptPath }
+            if ($prev.cmdAt) { $cmdAt = [long]$prev.cmdAt }
         } catch { }
     }
 
@@ -117,6 +121,10 @@ try {
         if ($p -match '(?i)#name\s+(.+?)(?=\s+#group\b|\s*$)') {
             $v = (($matches[1]) -replace '\s+', ' ').Trim()
             if ($v) {
+                # Append _MMDDYYYY so the same name on a different day stays
+                # distinct (avoids collisions like two "Career"s). Skip if the
+                # user already typed a trailing _ddddddd date.
+                if ($v -notmatch '_\d{8}$') { $v = $v + '_' + (Get-Date -Format 'MMddyyyy') }
                 if ($v.Length -gt 60) { $v = $v.Substring(0, 60) }
                 $title = $v; $setName = $true
                 try { Set-Content -Path $labelFile -Value $title -Encoding UTF8 -NoNewline } catch { }
@@ -131,6 +139,9 @@ try {
             }
         }
         $isMarker = ($setName -or $setGroup)
+        # Stamp the command time so the panel re-pins this session on a fresh
+        # command even if it was previously unpinned/dismissed.
+        if ($isMarker) { $cmdAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }
     }
 
     # Map the incoming -Event to a panel state.
@@ -178,6 +189,7 @@ try {
         project        = $proj
         title          = $title
         group          = $group
+        cmdAt          = $cmdAt
         state          = $state
         message        = $message
         transcriptPath = $transcriptPath

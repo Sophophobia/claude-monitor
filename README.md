@@ -69,7 +69,9 @@ To give a session a meaningful name, use either method:
   for example `#name Frontend refactor`. The hook captures it, labels that exact
   session, and **blocks the prompt so Claude never processes it** (you just see a
   small "session labelled" confirmation). Re-run any time to change it. It binds
-  to the correct session automatically, so you never look up an id.
+  to the correct session automatically, so you never look up an id. The current
+  date is appended as `_MMDDYYYY` (e.g. `Career_06242026`) so the same name reused
+  on another day stays distinct.
 - **Set the group too:** `#group <group name>` puts the session in a group
   (creating it if new). You can do both in one prompt, in any order, e.g.
   `#name Frontend refactor #group Career` or `#group Career`.
@@ -83,8 +85,10 @@ To give a session a meaningful name, use either method:
 > title and syncs it automatically.
 
 Naming or grouping a session with `#name` / `#group` also **auto-pins it** to
-the panel, so you do not have to add it from the menu first. (Unpin it manually
-and it stays unpinned; a later manual drag to another group is never overridden.)
+the panel, so you do not have to add it from the menu first. If you unpin it it
+stays unpinned — until you issue `#name`/`#group` again, which **re-pins it** (so
+the command always wins). A later manual drag to another group is not overridden
+unless you re-issue `#group`.
 
 **Label priority:** panel custom name > `#name` label > `project (shortid)`.
 
