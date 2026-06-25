@@ -18,18 +18,21 @@ Each pinned session is one row: a colored dot + a label + its current state.
 | Dot | State | Meaning | Fired by hook |
 |---|---|---|---|
 | 🔵 | `Running` | Claude is working / a tool is running | `UserPromptSubmit`, `PreToolUse`/`PostToolUse` |
-| 🟠 | `Needs permission` | A tool has been blocked > ~3s — almost always a permission prompt | `PreToolUse` timing (see below) |
+| 🟠 | `Needs permission` | A tool is waiting for you to approve it | desktop app log (exact), else `PreToolUse` timing |
 | 🟣 | `Needs answer` | Claude asked you a question | `PreToolUse` (AskUserQuestion) |
 | 🟢 | `Waiting` | Your turn — finished its reply, or a fresh session | `Stop` / `SessionStart` |
 | ⚪ | `Ended` | Conversation **deleted** (its transcript is gone) | transcript file no longer on disk |
 
-> **Why permission is detected by timing:** the desktop app does **not** fire a
-> `Notification` hook when a permission dialog appears (verified). So instead,
-> `PreToolUse` marks the session pending and the panel turns it orange once a
-> tool has been pending longer than `$script:PendingPermMs` in `panel.ps1`
-> (default **3000 ms**) — auto-approved tools return in well under a second and
-> never flip. Caveat: a genuinely long-running approved tool (e.g. a 30s build)
-> also shows orange until it returns; raise the threshold if that is noisy.
+> **How permission is detected:** the desktop app does **not** fire a
+> `Notification` hook when a permission dialog appears, but it *does* log the
+> exact permission lifecycle in `%APPDATA%\Claude\logs\main.log` (request emitted
+> / response received) and maps each conversation to its CLI session. When a
+> session is covered by that log the panel reads it directly — accurate, instant,
+> and it clears the moment you approve. Only sessions **not** in the log (e.g.
+> Claude Code running in a plain terminal, no desktop app) fall back to a timing
+> heuristic: `PreToolUse` marks the session pending and it turns orange after
+> `$script:PendingPermMs` (default **3000 ms**); there, a genuinely long-running
+> approved tool also shows orange until it returns.
 
 ## Install
 
@@ -211,12 +214,12 @@ Claude Code session --(hooks)--> status-hook.ps1 --> ~/.claude/session-status/<i
 | 圆点 | 状态 | 含义 | 触发的 hook |
 |---|---|---|---|
 | 🔵 | `Running` | Claude 正在工作 / 工具运行中 | `UserPromptSubmit`、`PreToolUse`/`PostToolUse` |
-| 🟠 | `Needs permission` | 某个工具卡住超过约 3 秒——几乎肯定是在等你授权 | `PreToolUse` 时序（见下） |
+| 🟠 | `Needs permission` | 某个工具在等你授权 | 桌面 App 日志（精确），否则 `PreToolUse` 时序 |
 | 🟣 | `Needs answer` | Claude 问了你一个问题 | `PreToolUse`（AskUserQuestion） |
 | 🟢 | `Waiting` | 轮到你了——答完一轮，或刚开的会话 | `Stop` / `SessionStart` |
 | ⚪ | `Ended` | 对话被**删除**（transcript 文件没了） | 磁盘上 transcript 文件已不存在 |
 
-> **为什么权限靠时序判断：** 桌面 App 在弹出权限对话框时**不会**触发 `Notification` hook（已实测确认）。所以改成：`PreToolUse` 把会话标记为 pending，当某个工具 pending 超过 `panel.ps1` 里的 `$script:PendingPermMs`（默认 **3000 毫秒**）时面板就变橙——自动批准的工具毫秒级就返回，根本不会变橙。代价：一个真的要跑很久的工具（比如 30 秒的 build）在返回前也会一直显示橙色;嫌烦就把阈值调大。
+> **权限怎么判断：** 桌面 App 弹权限框时**不会**触发 `Notification` hook，但它会把完整的权限生命周期记进 `%APPDATA%\Claude\logs\main.log`（请求发出 / 收到响应），并记录每个对话对应的 CLI session。会话只要被这份日志覆盖，面板就**直接读日志**——精确、即时、你一批准立刻熄灭。只有**不在日志里**的会话（比如在纯终端里跑、没开桌面 App 的 Claude Code）才退回时序启发法：`PreToolUse` 标记 pending，超过 `$script:PendingPermMs`（默认 **3000 毫秒**）变橙；这种情况下一个真的跑很久的工具在返回前也会显示橙色。
 
 ## 安装
 

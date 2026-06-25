@@ -391,6 +391,8 @@ $script:cwTitle    = @{}              # local_id -> app conversation title
 $script:cwTurn     = @{}              # local_id -> $true if a turn is currently in progress
 $script:cwLast     = @{}              # local_id -> [datetime] last activity (any log line)
 $script:cwOpenPerm = @{}              # requestId -> @{ id=local_id; tool=toolName }
+$script:cwCli      = @{}              # local_id -> CLI session id (so log permissions can
+                                      # be attributed to the matching Code session row)
 
 function Update-LogState {
     try {
@@ -430,6 +432,9 @@ function Update-LogState {
             }
             if ($l -match "Updated session (local_[0-9a-f\-]+): \{ title: '(.*?)', titleSource:") {
                 $script:cwTitle[$matches[1]] = $matches[2]
+            }
+            if ($l -match 'Mapping internal session (local_[0-9a-f\-]+) to CLI session ([0-9a-f\-]+)') {
+                $script:cwCli[$matches[1]] = $matches[2]
             }
             # Turn START / CONTINUE vs END. We don't trust the last [Lifecycle]
             # line alone (it scrolls out of the tail on a long turn); instead any
@@ -599,16 +604,34 @@ function Get-Sessions {
         }
     }
 
-    # Escalate 'pending' tools to 'permission'. A tool that has been pending
-    # longer than the threshold is almost certainly blocked on a permission
-    # prompt (auto-approved tools return in well under a second); until then it
-    # is just normal work, so keep it 'running'. Recomputed every refresh.
+    # Permission detection. The desktop app logs the exact permission lifecycle
+    # ("Emitted tool permission request ... in session local_X" / "Received
+    # permission response"), and maps each local_ session to its CLI session id.
+    # When a Code session is covered by the log we use that (accurate, instant,
+    # and it clears the moment you approve) instead of the timing heuristic, which
+    # otherwise flips any tool running longer than the threshold to orange.
+    Update-LogState
+    $cliPerm = @{}; $cliCovered = @{}
+    foreach ($lid in @($script:cwCli.Keys)) { $cliCovered[$script:cwCli[$lid]] = $true }
+    foreach ($rid in @($script:cwOpenPerm.Keys)) {
+        $p = $script:cwOpenPerm[$rid]
+        $cli = if ($p -and $p.id) { $script:cwCli[$p.id] } else { $null }
+        if ($cli) { if (-not $cliPerm.ContainsKey($cli)) { $cliPerm[$cli] = @() }; $cliPerm[$cli] += $p.tool }
+    }
     foreach ($k in @($map.Keys)) {
         $e = $map[$k]
-        if ($e.state -eq 'pending') {
-            if ($e.updatedAt -gt 0 -and ($nowMs - $e.updatedAt) -ge $script:PendingPermMs) {
-                $e.state = 'permission'
-            } else {
+        if ($cliPerm.ContainsKey($k)) {
+            # Authoritative: a tool in this session is awaiting your response.
+            $e.state = if ($cliPerm[$k] -contains 'AskUserQuestion') { 'ask' } else { 'permission' }
+        }
+        elseif ($e.state -eq 'pending') {
+            if ($cliCovered.ContainsKey($k)) {
+                $e.state = 'running'   # log covers it and shows no open prompt -> just working
+            }
+            elseif ($e.updatedAt -gt 0 -and ($nowMs - $e.updatedAt) -ge $script:PendingPermMs) {
+                $e.state = 'permission'   # fallback heuristic for sessions the log doesn't cover
+            }
+            else {
                 $e.state = 'running'
             }
         }
