@@ -121,10 +121,22 @@ try {
         if ($p -match '(?i)#name\s+(.+?)(?=\s+#group\b|\s*$)') {
             $v = (($matches[1]) -replace '\s+', ' ').Trim()
             if ($v) {
-                # Append _MMDDYYYY so the same name on a different day stays
-                # distinct (avoids collisions like two "Career"s). Skip if the
-                # user already typed a trailing _ddddddd date.
-                if ($v -notmatch '_\d{8}$') { $v = $v + '_' + (Get-Date -Format 'MMddyyyy') }
+                # Only append _MMDDYYYY when this name is ALREADY used by ANOTHER
+                # session (disambiguation). Scan the other sessions' persisted
+                # label files and compare base names (ignoring any _date suffix).
+                # If the user already typed a trailing _ddddddd date, leave it.
+                if ($v -notmatch '_\d{8}$') {
+                    $clash = $false
+                    try {
+                        foreach ($lf in (Get-ChildItem (Join-Path $dir '*.label') -ErrorAction SilentlyContinue)) {
+                            if ($lf.BaseName -eq $sid) { continue }
+                            $o = ''
+                            try { $o = (Get-Content $lf.FullName -Raw -ErrorAction Stop).Trim() } catch { }
+                            if (($o -replace '_\d{8}$', '') -eq $v) { $clash = $true; break }
+                        }
+                    } catch { }
+                    if ($clash) { $v = $v + '_' + (Get-Date -Format 'MMddyyyy') }
+                }
                 if ($v.Length -gt 60) { $v = $v.Substring(0, 60) }
                 $title = $v; $setName = $true
                 try { Set-Content -Path $labelFile -Value $title -Encoding UTF8 -NoNewline } catch { }

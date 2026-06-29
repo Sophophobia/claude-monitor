@@ -72,9 +72,9 @@ To give a session a meaningful name, use either method:
   for example `#name Frontend refactor`. The hook captures it, labels that exact
   session, and **blocks the prompt so Claude never processes it** (you just see a
   small "session labelled" confirmation). Re-run any time to change it. It binds
-  to the correct session automatically, so you never look up an id. The current
-  date is appended as `_MMDDYYYY` (e.g. `Career_06242026`) so the same name reused
-  on another day stays distinct.
+  to the correct session automatically, so you never look up an id. If the name
+  is **already used by another session**, the current date `_MMDDYYYY` is appended
+  (e.g. `Career_06292026`) so the two stay distinct; a unique name is kept as-is.
 - **Set the group too:** `#group <group name>` puts the session in a group
   (creating it if new). You can do both in one prompt, in any order, e.g.
   `#name Frontend refactor #group Career` or `#group Career`.
