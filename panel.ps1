@@ -206,12 +206,14 @@ $SessionDir = Join-Path $Home_ '.claude\sessions'
 # config.json lives next to this script so the whole tool folder is portable.
 $ConfigPath = Join-Path $PSScriptRoot 'config.json'
 
-# How long a tool may stay 'pending' (PreToolUse fired, PostToolUse not yet)
-# before we assume it is blocked on a permission prompt and show orange. The
-# desktop app fires no Notification for permission dialogs, so this timing
-# heuristic is how "Needs permission" is detected. Quick auto-approved tools
-# finish well under this, so they never flip to orange. Tweak to taste.
-$script:PendingPermMs = 3000
+# FALLBACK ONLY. Recent Claude Code (v2.1.233+) fires the Notification hook with
+# notification_type "permission_prompt" when a tool is blocked on a permission
+# dialog, so status-hook.ps1 now writes an accurate 'permission' state directly
+# (~6s after the tool blocks). This timing heuristic (flip 'pending' -> orange
+# after N ms) is only a safety net for older clients / any prompt that doesn't
+# notify. It is set well above the notify latency so the accurate signal always
+# wins first and a merely-slow tool never false-flips to orange.
+$script:PendingPermMs = 12000
 
 # --------------------------------------------------------------- config -----
 $script:Pins    = @()
@@ -604,12 +606,16 @@ function Get-Sessions {
         }
     }
 
-    # Permission detection. The desktop app logs the exact permission lifecycle
-    # ("Emitted tool permission request ... in session local_X" / "Received
-    # permission response"), and maps each local_ session to its CLI session id.
-    # When a Code session is covered by the log we use that (accurate, instant,
-    # and it clears the moment you approve) instead of the timing heuristic, which
-    # otherwise flips any tool running longer than the threshold to orange.
+    # Permission detection. Two accurate sources, then a timing fallback:
+    #  (1) status-hook writes state 'permission'/'ask' directly when the client
+    #      fires the Notification permission_prompt/elicitation hook (v2.1.233+).
+    #      That value is already in $e.state here and is left untouched below.
+    #  (2) On machines whose desktop app writes main.log, its exact permission
+    #      lifecycle ("Emitted tool permission request ... in session local_X" /
+    #      "Received permission response") maps each local_ id to its CLI session
+    #      id and overrides here (instant, clears the moment you approve).
+    #  (3) Only if neither covers a still-'pending' session does the timing
+    #      heuristic (PendingPermMs) apply -- set high so (1)/(2) win first.
     Update-LogState
     $cliPerm = @{}; $cliCovered = @{}
     foreach ($lid in @($script:cwCli.Keys)) { $cliCovered[$script:cwCli[$lid]] = $true }
